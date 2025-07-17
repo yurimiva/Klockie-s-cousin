@@ -15,7 +15,7 @@ class Button
       pinMode(btn, INPUT_PULLUP);
     }
     bool debounce() {
-      int pressed = 10;
+      int pressed = 7;
       while (digitalRead(btn) == LOW) {
       // pressed = (pressed == 0)? 0: pressed--;
       if (pressed == 0) pressed = 0;
