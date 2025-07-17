@@ -31,22 +31,22 @@ RTC_DS3231 RTC;
 // define buzzer
 const int Buzzer_Pin = 10;
 
-// define each variable for the changed time and date
+// define variables for DateTime
 uint8_t hour;
 uint8_t minutes;
 uint8_t day;
 uint8_t month;
 uint16_t year;
 
-
 // need to set an enumerable that helps me with the display of the 4 modes
 
 enum menu {
-  TimeAndDate,
-  TempAndHum,
-  Alarm,
-  StopAlarm,
-  Idle
+  TimeAndDate, // 0
+  TempAndHum, // 1
+  Alarm, // 2
+  StopAlarm,  // 3
+  ChangeTimeDate, // 4
+  Idle // 5 
 };
 
 // ---
@@ -115,7 +115,7 @@ void SingleBeep(bool *beep_state) {
 
   if (*beep_state == false) {
     *beep_state = true;
-    tone(Buzzer_Pin, 1047, 200);
+    tone(Buzzer_Pin, 1047, 100);
   }
 
 }
@@ -161,207 +161,207 @@ void DisplayTimeDate(DateTime previous) {
 }
 
 
-void ChangeTime(DateTime need_change, int state) {
+uint8_t ChangingTimeAndDate(uint8_t what_to_change, int min, int max, int cursor_x, int cursor_y) {
+
+  oled.drawFastHLine(cursor_x, (cursor_y - 5), 11, 1);
+  oled.display();
+
+  if (button_plus.debounce()) {
+
+    if (what_to_change >= 9) {
+      // animation for the change of the hour
+      oled.setCursor(cursor_x, cursor_y);
+      oled.setTextColor(1, 0);
+      oled.print("  ");
+      oled.display();
+          
+      oled.setCursor(cursor_x, cursor_y);
+      oled.setTextColor(1);
+
+        if (what_to_change == max) {
+        what_to_change = min;
+        oled.print("0");
+        oled.print(what_to_change);
+        oled.display();
+      } else {
+        what_to_change += 1;
+        oled.print(what_to_change);
+        oled.display();
+      }
+    } else { 
+      oled.setCursor(cursor_x, cursor_y);
+      oled.setTextColor(1,0);
+      oled.print("  ");
+      oled.display();
+
+      oled.setCursor(cursor_x, cursor_y);
+      oled.setTextColor(1);
+      oled.print("0");
+      what_to_change += 1;
+      oled.print(what_to_change);
+      oled.display();
+
+    }
+        
+  }
+
+  if (button_minus.debounce()) {
+
+    if (what_to_change > 10) {
+      oled.setCursor(cursor_x, cursor_y);
+      oled.setTextColor(1, 0);
+      oled.print("  ");
+      oled.display();
+          
+      oled.setCursor(cursor_x, cursor_y);
+      oled.setTextColor(1);
+      what_to_change -= 1;
+      oled.print(what_to_change);
+      oled.display();
+
+    } else { 
+
+      oled.setCursor(cursor_x, cursor_y);
+      oled.setTextColor(1,0);
+      oled.print("  ");
+      oled.display();
+
+      oled.setCursor(cursor_x, cursor_y);
+      oled.setTextColor(1);
+
+      if (what_to_change == min) {
+        what_to_change = max;
+        oled.print(what_to_change);
+        oled.display();
+      } else {
+        what_to_change -= 1;
+        oled.print("0");
+        oled.print(what_to_change);
+        oled.display();
+      }
+
+    }
+
+  }
+
+  if (SW_Pin.debounce()) {
+    return what_to_change;
+  }
+
+}
+
+uint16_t ChangingYear(uint16_t changing_year) {
+
+  oled.drawFastHLine(66, 45, 22, 1);
+
+  if (button_plus.debounce()) {
+
+    oled.setCursor(66, 45);
+    oled.setTextColor(1, 0);
+    oled.print("    ");
+    oled.display();
+          
+    oled.setCursor(66, 45);
+    oled.setTextColor(1);
+    changing_year++;
+    oled.print(changing_year);
+    oled.display();
+
+  }
+
+  if (button_minus.debounce()) {
+
+    oled.setCursor(66, 45);
+    oled.setTextColor(1, 0);
+    oled.print("    ");
+    oled.display();
+          
+    oled.setCursor(66, 45);
+    oled.setTextColor(1);
+    changing_year--;
+    oled.print(changing_year);
+    oled.display();
+
+  }
+
+  if (SW_Pin.debounce()) {
+    return changing_year;
+  }
+
+
+}
+
+void ChangeTimeAndDate(DateTime need_change) {
+
+  int count;
 
   oled.clearDisplay();
-
   oled.setCursor(0,0);
-  oled.print("   TIME SETTING");
+  oled.print("TIME AND DATE SETTING");
 
   oled.setCursor(30,25);
-  oled.setTextSize(2);
+  if (need_change.hour() <= 9) {
+    oled.print("0");
+  }
   oled.print(need_change.hour());
   oled.print(":");
+  if (need_change.minute() <= 9) {
+    oled.print("0");
+  }
   oled.print(need_change.minute());
   oled.display();
 
   uint8_t change_hour = need_change.hour();
   uint8_t change_minutes = need_change.minute();
 
-  // need an animation to show the change
-  oled.drawFastHLine(30, 20, 22, 1);
 
-  while (state == 1) {
+  oled.setCursor(20, 50);
+  if (need_change.day() <= 9) {
+    oled.print("0");
+  }
+  oled.print(need_change.day());
+  oled.print("/");
+  if (need_change.month() <= 9) {
+    oled.print("0");
+  }
+  oled.print(need_change.month());
+  oled.print("/");
+  oled.print(need_change.year());
+  oled.display();
 
-    if (button_plus.debounce()) {
+  uint8_t change_day = need_change.day();
+  uint8_t change_month = need_change.month();
+  uint8_t change_year = need_change.year();
 
-      if (change_hour >= 9) {
-        // animation for the change of the hour
-        oled.setCursor(30,25);
-        oled.setTextColor(1, 0);
-        oled.print("  ");
-        oled.display();
-        
-        oled.setCursor(30,25);
-        oled.setTextColor(1);
-
-        if (change_hour == 23) {
-          change_hour = 0;
-          oled.print("0");
-          oled.print(change_hour);
-          oled.display();
-        } else {
-          change_hour += 1;
-          oled.print(change_hour);
-          oled.display();
-        }
-
-      } else { 
-
-        oled.setCursor(30,25);
-        oled.setTextColor(1,0);
-        oled.print("  ");
-        oled.display();
-
-        oled.setCursor(30,25);
-        oled.setTextColor(1);
-        oled.print("0");
-        change_hour += 1;
-        oled.print(change_hour);
-        oled.display();
-
-      }
-      
-    }
-
-    if (button_minus.debounce()) {
-
-      if (change_hour > 10) {
-        // animation for the change of the hour
-        oled.setCursor(30,25);
-        oled.setTextColor(1, 0);
-        oled.print("  ");
-        oled.display();
-        
-        oled.setCursor(30,25);
-        oled.setTextColor(1);
-        change_hour -= 1;
-        oled.print(change_hour);
-        oled.display();
-
-      } else { 
-
-        oled.setCursor(30,25);
-        oled.setTextColor(1,0);
-        oled.print("  ");
-        oled.display();
-
-        oled.setCursor(30,25);
-        oled.setTextColor(1);
-
-        if (change_hour == 0) {
-          change_hour = 23;
-          oled.print(change_hour);
-          oled.display();
-        } else {
-          change_hour -= 1;
-          oled.print("0");
-          oled.print(change_hour);
-          oled.display();
-        }
-
-      }
-
-    }
-
-    if (SW_Pin.debounce()) {
-      hour = change_hour;
-      state = 2;
+  switch (count) {
+    case 0: 
+      hour = ChangingTimeAndDate(change_hour, 0, 23, 30, 25);
+      count++;
       break;
-    }
+    case 1: 
+      minutes = ChangingTimeAndDate(change_minutes, 0, 59, 48, 25);
+      count++;
+      break;
+    case 2:
+      day = ChangingTimeAndDate(change_day, 1, 31, 20, 50);
+      count++;
+      break;
+    case 3:
+      month= ChangingTimeAndDate(change_month, 1, 12, 38, 50);
+      count++;
+      break;
+    case 4:
+      year = ChangingYear(change_year);
+      count++;
+      break;
+    case 5:
+      RTC.adjust(DateTime(year, month, day, hour, minutes, 0));
+      count++;
+      break;
 
   }
 
-  while (state == 2) {
-
-    if (button_plus.debounce()) {
-
-      if (change_minutes >= 9) {
-        // animation for the change of the hour
-        oled.setCursor(66,25);
-        oled.setTextColor(1, 0);
-        oled.print("  ");
-        oled.display();
-        
-        oled.setCursor(66,25);
-        oled.setTextColor(1);
-
-        if (change_minutes == 59) {
-          change_minutes = 0;
-          oled.print("0");
-          oled.print(change_minutes);
-          oled.display();
-        } else {
-          change_minutes += 1;
-          oled.print(change_minutes);
-          oled.display();
-        }
-
-      } else { 
-
-        oled.setCursor(66,25);
-        oled.setTextColor(1,0);
-        oled.print("  ");
-        oled.display();
-
-        oled.setCursor(66,25);
-        oled.setTextColor(1);
-        oled.print("0");
-        change_minutes += 1;
-        oled.print(change_minutes);
-        oled.display();
-
-      }
-      
-    }
-
-    if (button_minus.debounce()) {
-
-      if (change_minutes > 10) {
-        // animation for the change of the hour
-        oled.setCursor(66,25);
-        oled.setTextColor(1, 0);
-        oled.print("  ");
-        oled.display();
-        
-        oled.setCursor(66,25);
-        oled.setTextColor(1);
-        change_minutes -= 1;
-        oled.print(change_minutes);
-        oled.display();
-
-      } else { 
-
-        oled.setCursor(66,25);
-        oled.setTextColor(1,0);
-        oled.print("  ");
-        oled.display();
-
-        oled.setCursor(66,25);
-        oled.setTextColor(1);
-
-        if (change_minutes == 0) {
-          change_minutes = 23;
-          oled.print(change_minutes);
-          oled.display();
-        } else {
-          change_minutes -= 1;
-          oled.print("0");
-          oled.print(change_minutes);
-          oled.display();
-        }
-
-      }
-
-      if (SW_Pin.debounce()) {
-        minutes = change_minutes;
-        state = 3;
-        break;
-      }
-
-    }
-  }
-
+  
 
 }
 
@@ -369,8 +369,6 @@ void loop () {
 
   // Declare an object of class TimeDate
   DateTime now = RTC.now();
-  // define variable for change mode
-  int menu = 0;
 
   // read temp and hum
   int temperature = (int)dht.readTemperature();  
@@ -385,46 +383,59 @@ void loop () {
   bool BEEP_STATE = false;
   BeepState = &BEEP_STATE;
 
+  enum menu MENU;
+
   if ((Y_Value < 312) && (150 < X_Value) && (X_Value < 874)) { // up condition
 
     SingleBeep(BeepState);
-    DisplayTimeDate(now);
+    MENU = TimeAndDate;
 
   } else if ((Y_Value > 712) &&  (150 < X_Value) && (X_Value < 874)) { // down condition
 
     SingleBeep(BeepState);
-
-    oled.clearDisplay();
-    oled.setCursor(50,50);
-    oled.print("GIU");
-    oled.display();
+    // ALARM
+    MENU = Alarm;
 
   } else if ((X_Value < 312) &&  (150 < Y_Value) && (Y_Value < 874)) { // left condition
 
     // set the buzzer's sound signal frequency 
     SingleBeep(BeepState);
+    MENU = StopAlarm;
 
-    oled.clearDisplay();
-    oled.setCursor(0,50);
-    oled.print("SINISTRA");
-    oled.display();
-
-  } else if  ((X_Value > 712) &&  (150 < Y_Value) && (Y_Value < 874)) { // right condition
+  } else if ((X_Value > 712) &&  (150 < Y_Value) && (Y_Value < 874)) { // right condition
 
     SingleBeep(BeepState);
-
-    DisplayDHT(temperature, humidity);
+    MENU = TempAndHum;
 
   } else {
-    // make sure it will do one single beep again
-    *BeepState = false;
 
-    if ((menu == 0) && (SW_Pin.debounce())) {
-      menu = 1;
-      ChangeTime(now, menu);
+    if (SW_Pin.debounce()) {
+      MENU = ChangeTimeDate;
+    }
+
+    switch (MENU) {
+    case TimeAndDate:
+      DisplayTimeDate(now);
+      *BeepState = false;
+      break;
+    case TempAndHum:
+      DisplayDHT(temperature, humidity);
+      *BeepState = false;
+      break;
+    case Alarm:
+      // DisplayAlarm;
+      *BeepState = false;
+      break;
+    case StopAlarm:
+      // StopAlarm;
+      *BeepState = false;
+      break;
+    case ChangeTimeDate:
+      ChangeTimeAndDate(now);
+      *BeepState = false;
+      break;
     }
 
   }
  
-
 }
