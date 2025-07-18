@@ -45,8 +45,8 @@ enum menu {
   TempAndHum, // 1
   Alarm, // 2
   StopAlarm,  // 3
-  ChangeTimeDate, // 4
-  Idle // 5 
+  TimeChange, // 4
+  DateChange
 };
 
 // ---
@@ -111,32 +111,8 @@ void DisplayDHT(int temperature, int humidity) {
 } 
 
 
-void SingleBeep(bool *beep_state) {
 
-  if (*beep_state == false) {
-    *beep_state = true;
-    tone(Buzzer_Pin, 1047, 100);
-  }
 
-}
-
-/*
-
-void ExecuteWhat(int interface_state) {
- 
-  while (interface_state == 0) {
-    // SU
-    //  DisplayTimeDate();
-  } 
-
-  while (interface_state == 1) {
-    // DESTRA
-    //DisplayDHT();
-  }
-
-}
-
-*/
 void DisplayTimeDate(DateTime previous) {
 
   oled.clearDisplay();
@@ -161,7 +137,7 @@ void DisplayTimeDate(DateTime previous) {
 }
 
 
-uint8_t ChangingTimeAndDate(uint8_t what_to_change, int min, int max, int cursor_x, int cursor_y) {
+uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, int cursor_y) {
 
   oled.drawFastHLine(cursor_x, (cursor_y - 5), 11, 1);
   oled.display();
@@ -202,6 +178,8 @@ uint8_t ChangingTimeAndDate(uint8_t what_to_change, int min, int max, int cursor
       oled.display();
 
     }
+
+    return what_to_change;
         
   }
 
@@ -242,15 +220,15 @@ uint8_t ChangingTimeAndDate(uint8_t what_to_change, int min, int max, int cursor
 
     }
 
+    return what_to_change;
+
   }
 
-  if (SW_Pin.debounce()) {
-    return what_to_change;
-  }
 
 }
 
-uint16_t ChangingYear(uint16_t changing_year) {
+/*
+uint16_t ExecuteChangeYear(uint16_t changing_year) {
 
   oled.drawFastHLine(66, 45, 22, 1);
 
@@ -291,9 +269,11 @@ uint16_t ChangingYear(uint16_t changing_year) {
 
 }
 
-void ChangeTimeAndDate(DateTime need_change) {
+*/
 
-  int count;
+void ChangeTime(DateTime need_change) {
+
+  byte count;
 
   oled.clearDisplay();
   oled.setCursor(0,0);
@@ -314,6 +294,20 @@ void ChangeTimeAndDate(DateTime need_change) {
   uint8_t change_hour = need_change.hour();
   uint8_t change_minutes = need_change.minute();
 
+  if ((SW_Pin.debounce())  && (count = 0)){
+    hour = ExecuteChange(change_hour, 0, 23, 30, 25);
+    count = 1;
+  }
+
+  if ((SW_Pin.debounce())  && (count = 1)){
+    minutes = ExecuteChange(change_minutes, 0, 59, 48, 25);
+  }
+  
+
+}
+
+/*
+void ChangeDate(DateTime need_change) {
 
   oled.setCursor(20, 50);
   if (need_change.day() <= 9) {
@@ -332,38 +326,9 @@ void ChangeTimeAndDate(DateTime need_change) {
   uint8_t change_day = need_change.day();
   uint8_t change_month = need_change.month();
   uint8_t change_year = need_change.year();
-
-  switch (count) {
-    case 0: 
-      hour = ChangingTimeAndDate(change_hour, 0, 23, 30, 25);
-      count++;
-      break;
-    case 1: 
-      minutes = ChangingTimeAndDate(change_minutes, 0, 59, 48, 25);
-      count++;
-      break;
-    case 2:
-      day = ChangingTimeAndDate(change_day, 1, 31, 20, 50);
-      count++;
-      break;
-    case 3:
-      month= ChangingTimeAndDate(change_month, 1, 12, 38, 50);
-      count++;
-      break;
-    case 4:
-      year = ChangingYear(change_year);
-      count++;
-      break;
-    case 5:
-      RTC.adjust(DateTime(year, month, day, hour, minutes, 0));
-      count++;
-      break;
-
-  }
-
-  
-
 }
+
+*/
 
 void loop () {  
 
@@ -378,64 +343,49 @@ void loop () {
   int X_Value = analogRead(VrX);
   int Y_Value = analogRead(VrY);
 
-  // qua il puntatore fa comodo per ogni volta che chiamerò la funzione SingleBeep
-  bool *BeepState;
-  bool BEEP_STATE = false;
-  BeepState = &BEEP_STATE;
-
-  enum menu MENU;
+  static menu MENU;
 
   if ((Y_Value < 312) && (150 < X_Value) && (X_Value < 874)) { // up condition
 
-    SingleBeep(BeepState);
     MENU = TimeAndDate;
 
   } else if ((Y_Value > 712) &&  (150 < X_Value) && (X_Value < 874)) { // down condition
 
-    SingleBeep(BeepState);
     // ALARM
     MENU = Alarm;
 
   } else if ((X_Value < 312) &&  (150 < Y_Value) && (Y_Value < 874)) { // left condition
 
-    // set the buzzer's sound signal frequency 
-    SingleBeep(BeepState);
     MENU = StopAlarm;
 
   } else if ((X_Value > 712) &&  (150 < Y_Value) && (Y_Value < 874)) { // right condition
 
-    SingleBeep(BeepState);
     MENU = TempAndHum;
 
   } else {
 
     if (SW_Pin.debounce()) {
-      MENU = ChangeTimeDate;
+      MENU = TimeChange;
     }
 
-    switch (MENU) {
+  }
+
+  switch (MENU) {
     case TimeAndDate:
       DisplayTimeDate(now);
-      *BeepState = false;
       break;
     case TempAndHum:
       DisplayDHT(temperature, humidity);
-      *BeepState = false;
       break;
     case Alarm:
       // DisplayAlarm;
-      *BeepState = false;
       break;
     case StopAlarm:
       // StopAlarm;
-      *BeepState = false;
       break;
-    case ChangeTimeDate:
-      ChangeTimeAndDate(now);
-      *BeepState = false;
+    case TimeChange:
+      ChangeTime(now);
       break;
-    }
-
   }
  
 }

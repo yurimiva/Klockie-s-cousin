@@ -11,11 +11,10 @@ class Button
   public:
     void begin(uint8_t button) {
       btn = button;
-      state = 0;
       pinMode(btn, INPUT_PULLUP);
     }
     bool debounce() {
-      int pressed = 7;
+      int pressed = 5;
       while (digitalRead(btn) == LOW) {
       // pressed = (pressed == 0)? 0: pressed--;
       if (pressed == 0) pressed = 0;
