@@ -31,14 +31,8 @@ RTC_DS3231 RTC;
 // define buzzer
 const int Buzzer_Pin = 10;
 
-// define variables for DateTime
-uint8_t hour;
-uint8_t minutes;
-uint8_t day;
-uint8_t month;
-uint16_t year;
 
-// need to set an enumerable that helps me with the display of the 4 modes
+// need to set an enumerable that helps me with the display of the modes
 
 enum menu {
   TimeAndDate, // 0
@@ -79,6 +73,24 @@ void setup () {
 
   // initialize the RTC
   RTC.begin();
+  // we don't need the 32K Pin, so disable it
+  RTC.disable32K(); // making sure it won't give problems even tho the 32K pin is not connected
+  // need to connect SQW pin of the RTC
+
+  // setup for the SQW PIN
+  // Making it so, that the alarm will trigger an interrupt
+  //pinMode(CLOCK_INTERRUPT_PIN, INPUT_PULLUP);
+  //attachInterrupt(digitalPinToInterrupt(CLOCK_INTERRUPT_PIN), onAlarm, FALLING);
+
+  // set alarm 1 flag to false (so alarm 1 didn't happen so far)
+  // if not done, this easily leads to problems, as thr register isn't reset on reboot/recompile
+  RTC.clearAlarm(1);
+
+
+  // stop oscillating signals at SQW Pin
+  // otherwise setAlarm1 will fail
+  RTC.writeSqwPinMode(DS3231_OFF);
+
 
 } 
 
@@ -109,8 +121,6 @@ void DisplayDHT(int temperature, int humidity) {
   oled.display();
 
 } 
-
-
 
 
 void DisplayTimeDate(DateTime previous) {
@@ -222,6 +232,7 @@ uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, in
 
 }
 
+
 uint16_t ExecuteChangeYear(uint16_t changing_year) {
 
   do {
@@ -267,6 +278,7 @@ uint16_t ExecuteChangeYear(uint16_t changing_year) {
 
 }
 
+
 void ChangeTimeAndDate(DateTime need_change, byte count) {
 
   // TIME //
@@ -311,37 +323,91 @@ void ChangeTimeAndDate(DateTime need_change, byte count) {
     change_hour = ExecuteChange(change_hour, 0, 23, 30, 25);
     oled.display();
     count++;
-    hour = change_hour;
     break;
   case 2:
     change_minutes = ExecuteChange(change_minutes, 0, 59, 48, 25);
     oled.display();
     count = 3;
-    minutes = change_minutes;
     break;
   case 3:
     change_day = ExecuteChange(change_day, 1, 31, 20, 50);
     oled.display();
     count = 4;
-    day = change_day;
   case 4:
     change_month = ExecuteChange(change_month, 1, 12, 48, 50);
     oled.display();
     count = 5;
-    month = change_month;
   case 5:
     change_year = ExecuteChangeYear(change_year);
     oled.display();
     count = 6;
-    year = change_year;
     break;
   case 6:
-    RTC.adjust(DateTime(year, month, day, hour, minutes, 0));
+    RTC.adjust(DateTime(change_year, change_month, change_day, change_hour, change_minutes, 0));
   }
 
 
 }
 
+
+void PrepareAlarm(DateTime now) {
+
+  oled.clearDisplay();
+  oled.setCursor(0,0);
+  oled.print("   ALARM SETTING");
+
+  oled.setCursor(30,25);
+  if (now.hour() <= 9) {
+    oled.print("0");
+  }
+  oled.print(now.hour());
+
+  oled.print(":");
+
+  if (now.minute() <= 9) {
+    oled.print("0");
+  }
+  oled.print(now.minute());
+  oled.display();
+
+  uint8_t hour_alarm = now.hour();
+  uint8_t minutes_alarm = now.minute();
+
+  hour_alarm = ExecuteChange(hour_alarm, 0, 23, 30, 25);
+  minutes_alarm = ExecuteChange(minutes_alarm, 0, 59, 48, 25);
+
+  RTC.setAlarm1(DateTime(now.year(), now.month(), now.day(), hour_alarm, minutes_alarm, 0), DS3231_A1_Hour);
+
+}
+
+
+void ClearOrDeactivateAlarm(DateTime now) {
+
+  oled.clearDisplay();
+  oled.setCursor(0,0);
+  oled.print("WANT TO DEACTIVATE ALARM?");
+
+  oled.setCursor(30,25);
+  if (now.hour() <= 9) {
+    oled.print("0");
+  }
+  oled.print(now.hour());
+
+  oled.print(":");
+
+  if (now.minute() <= 9) {
+    oled.print("0");
+  }
+  oled.print(now.minute());
+  oled.display();
+
+  oled.setCursor(20,50);
+  oled.print("YES");
+
+  oled.setCursor(60,50);
+  oled.print("NO");
+
+}
 
 void BeepOnce(bool *beepstate) {
 
@@ -393,7 +459,7 @@ void loop () {
 
   } else {
 
-    if (SW_Pin.debounce()) {
+    if ((SW_Pin.debounce()) && (MENU = TimeAndDate)) {
 
       *BEEPSTATE = false;
       MENU = TimeDateChange;
@@ -409,10 +475,10 @@ void loop () {
       DisplayDHT(temperature, humidity);
       break;
     case Alarm:
-      // DisplayAlarm;
+      PrepareAlarm(now);
       break;
     case StopAlarm:
-      // StopAlarm;
+      ClearOrDeactivateAlarm(now);
       break;
     case TimeDateChange:
       count = 1;
