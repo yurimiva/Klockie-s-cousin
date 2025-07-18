@@ -137,24 +137,25 @@ void DisplayTimeDate(DateTime previous) {
 }
 
 
-uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, int cursor_y) {
+void ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, int cursor_y) {
 
   oled.drawFastHLine(cursor_x, (cursor_y - 5), 11, 1);
   oled.display();
 
   if (button_plus.debounce()) {
 
-    if (what_to_change >= 9) {
-      // animation for the change of the hour
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1, 0);
-      oled.print("  ");
-      oled.display();
-          
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1);
+    // animation for the change of the hour
+    oled.setCursor(cursor_x, cursor_y);
+    oled.setTextColor(1, 0);
+    oled.print("  ");
+    oled.display();
 
-        if (what_to_change == max) {
+    oled.setCursor(cursor_x, cursor_y);
+    oled.setTextColor(1);
+
+    if (what_to_change >= 9) {
+          
+      if (what_to_change == max) {
         what_to_change = min;
         oled.print("0");
         oled.print(what_to_change);
@@ -164,48 +165,36 @@ uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, in
         oled.print(what_to_change);
         oled.display();
       }
-    } else { 
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1,0);
-      oled.print("  ");
-      oled.display();
 
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1);
+    } else { 
+
       oled.print("0");
       what_to_change += 1;
       oled.print(what_to_change);
       oled.display();
 
     }
-
-    return what_to_change;
         
   }
 
   if (button_minus.debounce()) {
 
+    // animation for the change of the hour
+    oled.setCursor(cursor_x, cursor_y);
+    oled.setTextColor(1, 0);
+    oled.print("  ");
+    oled.display();
+
+    oled.setCursor(cursor_x, cursor_y);
+    oled.setTextColor(1);
+
     if (what_to_change > 10) {
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1, 0);
-      oled.print("  ");
-      oled.display();
-          
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1);
+
       what_to_change -= 1;
       oled.print(what_to_change);
       oled.display();
 
     } else { 
-
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1,0);
-      oled.print("  ");
-      oled.display();
-
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1);
 
       if (what_to_change == min) {
         what_to_change = max;
@@ -220,8 +209,10 @@ uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, in
 
     }
 
-    return what_to_change;
+  }
 
+  if (SW_Pin.debounce()) {
+    hour = what_to_change;
   }
 
 
@@ -271,9 +262,7 @@ uint16_t ExecuteChangeYear(uint16_t changing_year) {
 
 */
 
-void ChangeTime(DateTime need_change) {
-
-  byte count;
+void ChangeTime(DateTime need_change, byte count) {
 
   oled.clearDisplay();
   oled.setCursor(0,0);
@@ -294,13 +283,12 @@ void ChangeTime(DateTime need_change) {
   uint8_t change_hour = need_change.hour();
   uint8_t change_minutes = need_change.minute();
 
-  if ((SW_Pin.debounce())  && (count = 0)){
-    hour = ExecuteChange(change_hour, 0, 23, 30, 25);
-    count = 1;
+  while (count == 1) {
+    ExecuteChange(change_hour, 0, 23, 30, 25);
   }
 
   if ((SW_Pin.debounce())  && (count = 1)){
-    minutes = ExecuteChange(change_minutes, 0, 59, 48, 25);
+    ExecuteChange(change_minutes, 0, 59, 48, 25);
   }
   
 
@@ -334,6 +322,8 @@ void loop () {
 
   // Declare an object of class TimeDate
   DateTime now = RTC.now();
+  // this is for each change in parameters of DateTime
+  byte count;
 
   // read temp and hum
   int temperature = (int)dht.readTemperature();  
@@ -384,7 +374,8 @@ void loop () {
       // StopAlarm;
       break;
     case TimeChange:
-      ChangeTime(now);
+      count = 1;
+      ChangeTime(now, count);
       break;
   }
  
