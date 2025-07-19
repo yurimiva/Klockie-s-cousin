@@ -1,3 +1,4 @@
+#include <Wire.h>
 #include <Adafruit_GFX.h> 
 #include <Adafruit_SSD1306.h> 
 #include <DHT.h>  
@@ -27,6 +28,9 @@ Button button_plus;
 
 // define an rtc object
 RTC_DS3231 RTC;
+// define the PIN connected to SQW
+const int CLOCK_INTERRUPT = 2;
+volatile bool alarm = false; // need a global variable here so I won't mess up the interupt function
 
 // define buzzer
 const int Buzzer_Pin = 10;
@@ -45,6 +49,14 @@ enum menu {
 
 // ---
 
+// ISR function
+void onAlarm() {
+
+  alarm = true;
+
+}
+
+
 void setup () {
 
   // initialize the dht sensor
@@ -61,8 +73,8 @@ void setup () {
   pinMode(VrY, INPUT);
 
   // define mode for buttons (each is in mode INPUT_PULLUP)
-  SW_Pin.begin(2);
-  button_minus.begin(5);
+  SW_Pin.begin(4);
+  button_minus.begin(6);
   button_plus.begin(7);
 
   //buzzer
@@ -73,28 +85,27 @@ void setup () {
 
   // initialize the RTC
   RTC.begin();
-  // we don't need the 32K Pin, so disable it
-  RTC.disable32K(); // making sure it won't give problems even tho the 32K pin is not connected
-  // need to connect SQW pin of the RTC
+  // don't need the 32K Pin, so I simply didn't connect it
 
   // setup for the SQW PIN
   // Making it so, that the alarm will trigger an interrupt
-  //pinMode(CLOCK_INTERRUPT_PIN, INPUT_PULLUP);
-  //attachInterrupt(digitalPinToInterrupt(CLOCK_INTERRUPT_PIN), onAlarm, FALLING);
+  pinMode(CLOCK_INTERRUPT, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(CLOCK_INTERRUPT), onAlarm, FALLING);
 
   // set alarm 1 flag to false (so alarm 1 didn't happen so far)
   // if not done, this easily leads to problems, as thr register isn't reset on reboot/recompile
   RTC.clearAlarm(1);
 
-
   // stop oscillating signals at SQW Pin
   // otherwise setAlarm1 will fail
   RTC.writeSqwPinMode(DS3231_OFF);
 
+  RTC.clearAlarm(2); // we won't use it, but still best to avoid problems
+  RTC.disableAlarm(2);
 
 } 
 
-//I have the display function for temp and hum
+
 void DisplayDHT(int temperature, int humidity) {
 
   // how I want my oled
@@ -350,42 +361,43 @@ void ChangeTimeAndDate(DateTime need_change, byte count) {
 }
 
 
-void PrepareAlarm(DateTime now) {
+void PrepareAlarm(DateTime my_alarm) {
 
   oled.clearDisplay();
   oled.setCursor(0,0);
   oled.print("   ALARM SETTING");
 
+  uint8_t hour_alarm = my_alarm.hour();
+  uint8_t minutes_alarm = my_alarm.minute();
+
   oled.setCursor(30,25);
-  if (now.hour() <= 9) {
+  if (hour_alarm <= 9) {
     oled.print("0");
   }
-  oled.print(now.hour());
+  oled.print(hour_alarm);
 
   oled.print(":");
 
-  if (now.minute() <= 9) {
+  if (minutes_alarm <= 9) {
     oled.print("0");
   }
-  oled.print(now.minute());
+  oled.print(minutes_alarm);
   oled.display();
-
-  uint8_t hour_alarm = now.hour();
-  uint8_t minutes_alarm = now.minute();
 
   hour_alarm = ExecuteChange(hour_alarm, 0, 23, 30, 25);
   minutes_alarm = ExecuteChange(minutes_alarm, 0, 59, 48, 25);
 
-  RTC.setAlarm1(DateTime(now.year(), now.month(), now.day(), hour_alarm, minutes_alarm, 0), DS3231_A1_Hour);
+  RTC.setAlarm1(DateTime(0, 0, 0, hour_alarm, minutes_alarm, 0), DS3231_A1_Hour);
+  oled.display();
 
 }
 
 
-void ClearOrDeactivateAlarm(DateTime now) {
+void DisableAlarm(DateTime now) {
 
   oled.clearDisplay();
   oled.setCursor(0,0);
-  oled.print("WANT TO DEACTIVATE ALARM?");
+  oled.print("WANT TO DISABLE ALARM?");
 
   oled.setCursor(30,25);
   if (now.hour() <= 9) {
@@ -402,12 +414,18 @@ void ClearOrDeactivateAlarm(DateTime now) {
   oled.display();
 
   oled.setCursor(20,50);
-  oled.print("YES");
+  oled.print("YES  (press +)");
+  if (button_plus.debounce()) {
+    RTC.disableAlarm(1);
+  }
 
   oled.setCursor(60,50);
-  oled.print("NO");
+  oled.print("NO  (press -)");
+
+  oled.display();
 
 }
+
 
 void BeepOnce(bool *beepstate) {
 
@@ -422,6 +440,7 @@ void loop () {
 
   // Declare an object of class TimeDate
   DateTime now = RTC.now();
+  DateTime alarm_display = RTC.getAlarm1();
   // this is for each change in parameters of DateTime
   byte count;
 
@@ -475,15 +494,22 @@ void loop () {
       DisplayDHT(temperature, humidity);
       break;
     case Alarm:
-      PrepareAlarm(now);
+      PrepareAlarm(alarm_display);
       break;
     case StopAlarm:
-      ClearOrDeactivateAlarm(now);
+      DisableAlarm(alarm_display);
       break;
     case TimeDateChange:
       count = 1;
       ChangeTimeAndDate(now, count);
       break;
   }
+
+  if (alarm) {
+    RTC.alarmFired(1);
+    oled.print("Alarm is firing");
+    oled.display();
+  }
+
  
 }
