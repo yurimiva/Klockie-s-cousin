@@ -3,7 +3,7 @@
 #include <Adafruit_SSD1306.h> 
 #include <DHT.h>  
 #include <RTClib.h>
-// #include "pitches.h"
+#include "pitches.h"
 #include "button.h"
   
 // define the DHT
@@ -35,16 +35,15 @@ volatile bool alarm = false; // need a global variable here so I won't mess up t
 // define buzzer
 const int Buzzer_Pin = 10;
 
-
 // need to set an enumerable that helps me with the display of the modes
 
 enum menu {
-  TimeAndDate, // 0
-  TempAndHum, // 1
-  Alarm, // 2
-  StopAlarm,  // 3
-  TimeDateChange, // 4
-  Idle // 5
+  Idle, // 0
+  TimeAndDate, // 1
+  TempAndHum, // 2
+  Alarm, // 3
+  StopAlarm,  // 4
+  TimeDateChange // 5
 };
 
 // ---
@@ -158,7 +157,7 @@ void DisplayTimeDate(DateTime previous) {
 }
 
 
-uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, int cursor_y) {
+uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, int cursor_y, byte* change_index) {
 
   do {
 
@@ -235,16 +234,18 @@ uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, in
     }
 
     if (SW_Pin.debounce()) {
+      *change_index++;
       return what_to_change;
       break;
     }
 
-  } while (!SW_Pin.debounce());
+  } while (change_index);
+
 
 }
 
 
-uint16_t ExecuteChangeYear(uint16_t changing_year) {
+uint16_t ExecuteChangeYear(uint16_t changing_year, byte* year_change) {
 
   do {
 
@@ -281,16 +282,17 @@ uint16_t ExecuteChangeYear(uint16_t changing_year) {
     }
 
     if (SW_Pin.debounce()) {
+      *year_change++;
       return changing_year;
       break;
     }
 
-  } while (!SW_Pin.debounce());
+  } while (year_change);
 
 }
 
 
-void ChangeTimeAndDate(DateTime need_change, byte count) {
+void ChangeTimeAndDate(DateTime need_change, byte *change_count) {
 
   // TIME //
   oled.clearDisplay();
@@ -306,7 +308,6 @@ void ChangeTimeAndDate(DateTime need_change, byte count) {
     oled.print("0");
   }
   oled.print(need_change.minute());
-  oled.display();
   uint8_t change_hour = need_change.hour();
   uint8_t change_minutes = need_change.minute();
 
@@ -329,39 +330,38 @@ void ChangeTimeAndDate(DateTime need_change, byte count) {
   uint8_t change_month = need_change.month();
   uint16_t change_year = need_change.year();
 
-  switch (count) {
+  switch (*change_count) {
   case 1:
-    change_hour = ExecuteChange(change_hour, 0, 23, 30, 25);
+    change_hour = ExecuteChange(change_hour, 0, 23, 30, 25, change_count);
     oled.display();
-    count++;
     break;
   case 2:
-    change_minutes = ExecuteChange(change_minutes, 0, 59, 48, 25);
+    change_minutes = ExecuteChange(change_minutes, 0, 59, 48, 25, change_count);
     oled.display();
-    count = 3;
     break;
   case 3:
-    change_day = ExecuteChange(change_day, 1, 31, 20, 50);
+    change_day = ExecuteChange(change_day, 1, 31, 20, 50, change_count);
     oled.display();
-    count = 4;
+    break;
   case 4:
-    change_month = ExecuteChange(change_month, 1, 12, 48, 50);
+    change_month = ExecuteChange(change_month, 1, 12, 48, 50, change_count);
     oled.display();
-    count = 5;
+    break;
   case 5:
-    change_year = ExecuteChangeYear(change_year);
+    change_year = ExecuteChangeYear(change_year, change_count);
     oled.display();
-    count = 6;
     break;
   case 6:
     RTC.adjust(DateTime(change_year, change_month, change_day, change_hour, change_minutes, 0));
+    *change_count = 0;
+    break;
   }
 
 
 }
 
 
-void PrepareAlarm(DateTime my_alarm) {
+void PrepareAlarm(DateTime my_alarm, byte *count_alarm) {
 
   oled.clearDisplay();
   oled.setCursor(0,0);
@@ -384,43 +384,54 @@ void PrepareAlarm(DateTime my_alarm) {
   oled.print(minutes_alarm);
   oled.display();
 
-  hour_alarm = ExecuteChange(hour_alarm, 0, 23, 30, 25);
-  minutes_alarm = ExecuteChange(minutes_alarm, 0, 59, 48, 25);
-
-  RTC.setAlarm1(DateTime(0, 0, 0, hour_alarm, minutes_alarm, 0), DS3231_A1_Hour);
-  oled.display();
+  switch (*count_alarm) {
+    case 1:
+      hour_alarm = ExecuteChange(hour_alarm, 0, 23, 30, 25, count_alarm);
+      break;
+    case 2:
+      minutes_alarm = ExecuteChange(minutes_alarm, 0, 59, 48, 25, count_alarm);
+      break;
+    case 3:
+      RTC.setAlarm1(DateTime(0, 0, 0, hour_alarm, minutes_alarm, 0), DS3231_A1_Hour);
+      oled.display();
+      *count_alarm = 0;
+      break;
+  }
 
 }
 
 
-void DisableAlarm(DateTime now) {
+void DisableAlarm(DateTime MY_alarm) {
 
   oled.clearDisplay();
   oled.setCursor(0,0);
   oled.print("WANT TO DISABLE ALARM?");
 
   oled.setCursor(30,25);
-  if (now.hour() <= 9) {
+  if (MY_alarm.hour() <= 9) {
     oled.print("0");
   }
-  oled.print(now.hour());
+  oled.print(MY_alarm.hour());
 
   oled.print(":");
 
-  if (now.minute() <= 9) {
+  if (MY_alarm.minute() <= 9) {
     oled.print("0");
   }
-  oled.print(now.minute());
+  oled.print(MY_alarm.minute());
   oled.display();
 
-  oled.setCursor(20,50);
-  oled.print("YES  (press +)");
+  oled.setCursor(10,50);
+  oled.print("YES (press +)");
   if (button_plus.debounce()) {
     RTC.disableAlarm(1);
   }
 
-  oled.setCursor(60,50);
-  oled.print("NO  (press -)");
+  oled.setCursor(80,50);
+  oled.print("NO (-)");
+  if (button_minus.debounce()) {
+    RTC.setAlarm1(MY_alarm, DS3231_A1_Hour);
+  }
 
   oled.display();
 
@@ -442,7 +453,6 @@ void loop () {
   DateTime now = RTC.now();
   DateTime alarm_display = RTC.getAlarm1();
   // this is for each change in parameters of DateTime
-  byte count;
 
   // read temp and hum
   int temperature = (int)dht.readTemperature();  
@@ -454,6 +464,9 @@ void loop () {
 
   static menu MENU;
   static bool *BEEPSTATE;
+  static byte *index;
+
+  tone(Buzzer_Pin, NOTE_E5);
 
   if ((Y_Value < 312) && (150 < X_Value) && (X_Value < 874)) { // up condition
 
@@ -477,16 +490,28 @@ void loop () {
     MENU = TempAndHum;
 
   } else {
+    *BEEPSTATE = false;
 
     if ((SW_Pin.debounce()) && (MENU = TimeAndDate)) {
 
-      *BEEPSTATE = false;
       MENU = TimeDateChange;
+      *index = 1;
+    }
+
+    if ((SW_Pin.debounce()) && (MENU = Alarm)) {
+      *index = 1;
     }
 
   }
 
   switch (MENU) {
+    case Idle:
+      oled.setCursor(0,0);
+      oled.print("MOVE THE JOYSTICK AROUND");
+      oled.setCursor(0, 25);
+      oled.print(MENU);
+      oled.display();
+      break;
     case TimeAndDate:
       DisplayTimeDate(now);
       break;
@@ -494,17 +519,17 @@ void loop () {
       DisplayDHT(temperature, humidity);
       break;
     case Alarm:
-      PrepareAlarm(alarm_display);
+      PrepareAlarm(alarm_display, index);
       break;
     case StopAlarm:
       DisableAlarm(alarm_display);
       break;
     case TimeDateChange:
-      count = 1;
-      ChangeTimeAndDate(now, count);
+      ChangeTimeAndDate(now, index);
       break;
   }
 
+  // this works out but only for a few seconds, I'll need to make simple and repetitive melody
   if (alarm) {
     RTC.alarmFired(1);
     oled.print("Alarm is firing");
