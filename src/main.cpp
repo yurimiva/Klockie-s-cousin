@@ -5,7 +5,7 @@
 #include <RTClib.h>
 #include "pitches.h"
 #include "button.h"
-#include "doom_melody.h"
+#include "nokia_melody.h"
   
 // define the DHT
 #define DHTPIN 13 // pin connected to DHT11 sensor
@@ -23,9 +23,9 @@ const int VrX = 14;
 const int VrY = 15;
 
 // define the buttons
-Button SW_Pin;
-Button button_minus;
-Button button_plus;
+Button SW_Pin; // switch pin
+Button button_minus; // increases value
+Button button_plus; // decreases value
 
 // define an rtc object
 RTC_DS3231 RTC;
@@ -36,9 +36,9 @@ volatile bool alarm = false; // need a global variable here so I won't mess up t
 // define global variables for each parameter of the DateTime class
 uint8_t hour;
 uint8_t minutes;
-uint8_t day;
-uint8_t month;
-uint16_t year = 2025;
+uint8_t day = 1;
+uint8_t month = 1;
+uint16_t year;
 
 // define global variables for the alarm
 uint8_t alarm_h;
@@ -51,11 +51,11 @@ const int Buzzer_Pin = 10;
 
 enum menu {
   Idle, // 0
-  TimeAndDate, // 1
-  TempAndHum, // 2
-  Alarm, // 3
+  ShowTimeAndDate, // 1
+  ShowTempAndHum, // 2
+  ChangeAlarm, // 3
   StopAlarm,  // 4
-  TimeDateChange // 5
+  ChangeTimeDate // 5
 };
 
 // ---
@@ -190,11 +190,11 @@ void DisplayTimeDate(DateTime previous) {
 }
 
 
-uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, int cursor_y) {
+int ExecuteChange(int base, int min_base, int max_base, int cursor_x, int cursor_y) {
 
   while (!SW_Pin.debounce()) {
 
-    oled.drawFastHLine(cursor_x, (cursor_y - 5), 11, 1);
+    oled.drawFastHLine(cursor_x, (cursor_y - 5), 11, 1); // draws an horizontal line with the cursors from input
     oled.display();
 
     if (button_plus.debounce()) {
@@ -208,24 +208,24 @@ uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, in
       oled.setCursor(cursor_x, cursor_y);
       oled.setTextColor(1);
 
-      if (what_to_change >= 9) {
+      if (base >= 9) {
             
-        if (what_to_change == max) {
-          what_to_change = min;
+        if (base == max_base) {
+          base = min_base;
           oled.print("0");
-          oled.print(what_to_change);
+          oled.print(base);
           oled.display();
         } else {
-          what_to_change += 1;
-          oled.print(what_to_change);
+          base += 1;
+          oled.print(base);
           oled.display();
         }
 
       } else { 
 
         oled.print("0");
-        what_to_change += 1;
-        oled.print(what_to_change);
+        base += 1;
+        oled.print(base);
         oled.display();
 
       }
@@ -243,22 +243,22 @@ uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, in
       oled.setCursor(cursor_x, cursor_y);
       oled.setTextColor(1);
 
-      if (what_to_change > 10) {
+      if (base > 10) {
 
-        what_to_change -= 1;
-        oled.print(what_to_change);
+        base -= 1;
+        oled.print(base);
         oled.display();
 
       } else { 
 
-        if (what_to_change == min) {
-          what_to_change = max;
-          oled.print(what_to_change);
+        if (base == min_base) {
+          base = max_base;
+          oled.print(base);
           oled.display();
         } else {
-          what_to_change -= 1;
+          base -= 1;
           oled.print("0");
-          oled.print(what_to_change);
+          oled.print(base);
           oled.display();
         }
 
@@ -269,55 +269,9 @@ uint8_t ExecuteChange(uint8_t what_to_change, int min, int max, int cursor_x, in
   } 
 
   if (SW_Pin.debounce()) {
-    return what_to_change;
+    return base;
   }
 
-
-}
-
-
-uint16_t ExecuteChangeYear(uint16_t changing_year) {
-
-  while (!SW_Pin.debounce()) {
-
-    oled.drawFastHLine(56, 45, 22, 1);
-    oled.display();
-
-    if (button_plus.debounce()) {
-
-      oled.setCursor(56, 50);
-      oled.setTextColor(1, 0);
-      oled.print("    ");
-      oled.display();
-            
-      oled.setCursor(56, 50);
-      oled.setTextColor(1);
-      changing_year++;
-      oled.print(changing_year);
-      oled.display();
-
-    }
-
-    if (button_minus.debounce()) {
-
-      oled.setCursor(56, 50);
-      oled.setTextColor(1, 0);
-      oled.print("    ");
-      oled.display();
-            
-      oled.setCursor(56, 50);
-      oled.setTextColor(1);
-      changing_year--;
-      oled.print(changing_year);
-      oled.display();
-
-    }
-
-  } 
-
-  if (SW_Pin.debounce()) {
-    return changing_year;
-  }
 
 }
 
@@ -338,8 +292,8 @@ void ChangeTimeAndDate(DateTime need_change) {
     oled.print("0");
   }
   oled.print(need_change.minute());
-  uint8_t change_hour = need_change.hour();
-  uint8_t change_minutes = need_change.minute();
+  uint8_t current_hour = need_change.hour();
+  uint8_t current_minutes = need_change.minute();
 
   // DATE //
   oled.setCursor(20, 50);
@@ -356,42 +310,15 @@ void ChangeTimeAndDate(DateTime need_change) {
   oled.print(need_change.year());
   oled.display();
 
-  uint8_t change_day = need_change.day();
-  uint8_t change_month = need_change.month();
-  uint16_t change_year = need_change.year();
-
-  static int change_time_date;
-
-  if (SW_Pin.debounce()) {
-    change_time_date++;
-  }
-
-  switch (change_time_date) {
-  case 1:
-    hour = ExecuteChange(change_hour, 0, 23, 30, 25);
-    change_time_date++;
-    break;
-  case 2:
-    minutes = ExecuteChange(change_minutes, 0, 59, 48, 25);
-    change_time_date++;
-    break;
-  case 3:
-    day = ExecuteChange(change_day, 1, 31, 20, 50);
-    change_time_date++;
-    break;
-  case 4:
-    month = ExecuteChange(change_month, 1, 12, 38, 50);
-    change_time_date++;
-    break;
-  case 5:
-    year = ExecuteChangeYear(change_year);
-    change_time_date++;
-    break;
-  case 6:
-    RTC.adjust(DateTime(2025, month, day, hour, minutes, 0));
-    change_time_date = 0;
-    break;
-  }
+  uint8_t current_day = need_change.day();
+  uint8_t current_month = need_change.month();
+  
+  hour = ExecuteChange(current_hour, 0, 23, 30, 25);
+  minutes = ExecuteChange(current_minutes, 0, 59, 48, 25);
+  day = ExecuteChange(current_day, 1, 31, 20, 50);
+  month = ExecuteChange(current_month, 1, 12, 38, 50);
+  year += ExecuteChange(0, 0, 99, 68, 50);
+  RTC.adjust(DateTime(year, month, day, hour, minutes, 0));  
 
 }
 
@@ -419,26 +346,9 @@ void PrepareAlarm(DateTime my_alarm) {
   oled.print(minutes_alarm);
   oled.display();
 
-  static int count_alarm;
-
-  if (SW_Pin.debounce()) {
-    count_alarm++;
-  }
-
-  switch (count_alarm) {
-    case 1:
-      alarm_h = ExecuteChange(hour_alarm, 0, 23, 30, 25);
-      count_alarm++;
-      break;
-    case 2:
-      alarm_m = ExecuteChange(minutes_alarm, 0, 59, 48, 25);
-      count_alarm++;
-      break;
-    case 3:
-      RTC.setAlarm1(DateTime(0, 0, 0, alarm_h, alarm_h, 0), DS3231_A1_Hour);
-      count_alarm = 0;
-      break;
-  }
+  alarm_h = ExecuteChange(hour_alarm, 0, 23, 30, 25);
+  alarm_m = ExecuteChange(minutes_alarm, 0, 59, 48, 25);
+  RTC.setAlarm1(DateTime(0, 0, 0, alarm_h, alarm_h, 0), DS3231_A1_Hour);
 
 }
 
@@ -503,60 +413,61 @@ void loop () {
   int X_Value = analogRead(VrX);
   int Y_Value = analogRead(VrY);
 
-  static menu MENU;
+  static menu STATE;
   static bool BEEPSTATE;
 
   if ((Y_Value < 312) && (150 < X_Value) && (X_Value < 874)) { // up condition
 
     BeepOnce(&BEEPSTATE);
-    MENU = TimeAndDate;
+    STATE = ShowTimeAndDate;
 
   } else if ((Y_Value > 712) &&  (150 < X_Value) && (X_Value < 874)) { // down condition
 
     // ALARM
     BeepOnce(&BEEPSTATE);
-    MENU = Alarm;
+    STATE = ChangeAlarm;
 
   } else if ((X_Value < 312) &&  (150 < Y_Value) && (Y_Value < 874)) { // left condition
 
     BeepOnce(&BEEPSTATE);
-    MENU = StopAlarm;
+    STATE = StopAlarm;
 
   } else if ((X_Value > 712) &&  (150 < Y_Value) && (Y_Value < 874)) { // right condition
 
     BeepOnce(&BEEPSTATE);
-    MENU = TempAndHum;
+    STATE = ShowTempAndHum;
 
   } else {
 
     BEEPSTATE = false;
-    if ((SW_Pin.debounce()) && (MENU == TimeAndDate)) {
+    if ((SW_Pin.debounce()) && (STATE == ShowTimeAndDate)) {
 
-      MENU = TimeDateChange;
+      STATE = ChangeTimeDate;
     }
 
   }
 
-  switch (MENU) {
+  switch (STATE) {
     case Idle:
-      oled.setCursor(0,0);
-      oled.print("MOVE THE JOYSTICK");
-      oled.display();
+      
       break;
-    case TimeAndDate:
+    case ShowTimeAndDate:
       DisplayTimeDate(now);
       break;
-    case TempAndHum:
+    case ShowTempAndHum:
       DisplayDHT(temperature, humidity);
       break;
-    case Alarm:
+    case ChangeAlarm:
       PrepareAlarm(alarm_display);
+      STATE = ShowTimeAndDate;
       break;
     case StopAlarm:
       DisableAlarm(alarm_display);
+      STATE = ShowTimeAndDate;
       break;
-    case TimeDateChange:
+    case ChangeTimeDate:
       ChangeTimeAndDate(now);
+      STATE = ShowTimeAndDate;
       break;
   }
 
@@ -585,12 +496,13 @@ void loop () {
     }
 
 
-    if ((X_Value < 312) &&  (150 < Y_Value) && (Y_Value < 874)) { // if I move the jystick to the left
+    if (STATE == StopAlarm) { // if I move the jystick to the left
       RTC.clearAlarm(1);
       alarm = false;
       analogWrite(Buzzer_Pin, 0);
     }
   }
+  
 
  
 }
