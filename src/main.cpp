@@ -22,21 +22,8 @@ Adafruit_SSD1306 oled(screen_width, screen_height, &Wire, -1);
 const int Joystick_X = 14;
 const int Joystick_Y = 15;
 
-// TODO; verificare che qualcuno a cui spiego questa cosa capisca
-// declare constants necessary to determine which interface to show to the user
-// with how analogic inputs work, we have values between 0 and 1023
-
-// it goes from top (0) to bottom (1023)
-// and left (0) to right (1023)
-
-// the upper area will be between 0 and 255
-const int upper_area_limit = 255;
-// lower area will be between 769 and 1023
-const int lower_area_limit = 769;
-// left between 0 and 255
-const int left_area_limit = 255;
-// right between 769 and 1023
-const int right_area_limit = 769;
+// let's add an enum to mark things more easily
+enum Direction { UP, DOWN, LEFT, RIGHT, CENTER };
 
 // define the button
 Button SW_Pin; // switch pin
@@ -75,6 +62,7 @@ void onAlarm()
 
   alarm = true;
 }
+
 
 void setup()
 {
@@ -123,6 +111,7 @@ void setup()
   RTC.disableAlarm(2);
 }
 
+
 void DisplayDHT()
 {
 
@@ -154,222 +143,38 @@ void DisplayDHT()
   oled.display();
 }
 
+
 // TODO: test strftime
 void DisplayTimeDate()
 {
 
-  char buffer[80]; // this buffer is used for the strftime
+  oled.clearDisplay();
+
+  char buffer[19]; // this buffer is used for the strftime
+  for (int i = 0; i < 19; i++) buffer[i] = 0;
   // this is for each change in parameters of DateTime
   DateTime now = RTC.now(); // (DateTime(year, month, day, hour, minutes, 0));
 
-  struct tm date_and_time;
+  struct tm t;
 
-  date_and_time.tm_hour = now.hour();
-  date_and_time.tm_min = now.minute();
-  date_and_time.tm_mday = now.day();
-  date_and_time.tm_mon = now.month() - 1;
-  date_and_time.tm_year = now.year() - 1900;
-
-  oled.clearDisplay();
+  t.tm_year = now.year() - 1900;  // struct tm expects years since 1900
+  t.tm_mon  = now.month() - 1;    // struct tm expects months in [0, 11]
+  t.tm_mday = now.day();
+  t.tm_hour = now.hour();
+  t.tm_min  = now.minute();
+  mktime(&t);
   oled.setCursor(0, 0);
   oled.print("  TIME AND DATE");
 
   oled.setCursor(20, 25);
-  strftime(buffer, 80, "%H:%M \n %d/%m/%Y", &date_and_time);
+  strftime(buffer, 19, "%H:%M \n %d/%m/%Y", &t);
   oled.print(buffer);
-
-  oled.display();
-}
-
-// TODO: do a snprintf
-/*
-int ExecuteChange(int value, int min_value, int max_value, int cursor_x, int cursor_y)
-{
-
-  while (!SW_Pin.debounce())
-  {
-
-    oled.drawFastHLine(cursor_x, (cursor_y - 5), 11, 1); // draws an horizontal line with the cursors from input
-    oled.display();
-
-    if ()
-    {
-
-      // animation for the change of the hour
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1, 0);
-      oled.print("  ");
-      oled.display();
-
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1);
-
-      // TODO: snprintf
-      if (value >= 9)
-      {
-
-        if (value == max_value)
-        {
-          value = min_value;
-          oled.print("0");
-          oled.print(value);
-          oled.display();
-        }
-        else
-        {
-          value += 1;
-          oled.print(value);
-          oled.display();
-        }
-      }
-      else
-      {
-
-        oled.print("0");
-        value += 1;
-        oled.print(value);
-        oled.display();
-      }
-    }
-
-    if (button_minus.debounce())
-    {
-
-      // animation for the change of the hour
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1, 0);
-      oled.print("  ");
-      oled.display();
-
-      oled.setCursor(cursor_x, cursor_y);
-      oled.setTextColor(1);
-
-      if (value > 10)
-      {
-
-        value -= 1;
-        oled.print(value);
-        oled.display();
-      }
-      else
-      {
-
-        if (value == min_value)
-        {
-          value = max_value;
-          oled.print(value);
-          oled.display();
-        }
-        else
-        {
-          value -= 1;
-          oled.print("0");
-          oled.print(value);
-          oled.display();
-        }
-      }
-    }
-  }
-
-  if (SW_Pin.debounce())
-  {
-    return value;
-  }
-}
-
-*/
-
-// TODO: use snprintf
-/*
-void ChangeTimeAndDate()
-{
-
-  // this is for each change in parameters of DateTime
-  DateTime now = RTC.now(); // (DateTime(year, month, day, hour, minutes, 0));
-
-  // TIME //
-  oled.clearDisplay();
-  oled.setCursor(0, 0);
-  oled.print("TIME AND DATE SETTING");
-  oled.setCursor(30, 25);
-  if (now.hour() <= 9)
-  {
-    oled.print("0");
-  }
-  oled.print(now.hour());
-  oled.print(":");
-  if (now.minute() <= 9)
-  {
-    oled.print("0");
-  }
-  oled.print(now.minute());
-  uint8_t current_hour = now.hour();
-  uint8_t current_minutes = now.minute();
-
-  // DATE //
-  oled.setCursor(20, 50);
-  if (now.day() <= 9)
-  {
-    oled.print("0");
-  }
-  oled.print(now.day());
-  oled.print("/");
-  if (now.month() <= 9)
-  {
-    oled.print("0");
-  }
-  oled.print(now.month());
-  oled.print("/");
-  oled.print(now.year());
   oled.display();
 
-  uint8_t current_day = now.day();
-  uint8_t current_month = now.month();
-
-  hour = ExecuteChange(current_hour, 0, 23, 30, 25);
-  minutes = ExecuteChange(current_minutes, 0, 59, 48, 25);
-  day = ExecuteChange(current_day, 1, 31, 20, 50);
-  month = ExecuteChange(current_month, 1, 12, 38, 50);
-  year += ExecuteChange(0, 0, 99, 68, 50);
-  RTC.adjust(DateTime(year, month, day, hour, minutes, 0));
 }
-*/
 
-/*
-void PrepareAlarm()
-{
-  // Declare an object of class TimeDate
-  DateTime my_alarm = RTC.getAlarm1();
 
-  oled.clearDisplay();
-  oled.setCursor(0, 0);
-  oled.print("   ALARM SETTING");
 
-  uint8_t hour_alarm = my_alarm.hour();
-  uint8_t minutes_alarm = my_alarm.minute();
-
-  oled.setCursor(30, 25);
-  if (hour_alarm <= 9)
-  {
-    oled.print("0");
-  }
-  oled.print(hour_alarm);
-
-  oled.print(":");
-
-  if (minutes_alarm <= 9)
-  {
-    oled.print("0");
-  }
-  oled.print(minutes_alarm);
-  oled.display();
-
-  alarm_h = (uint8_t)ExecuteChange(hour_alarm, 0, 23, 30, 25);
-  alarm_m = (uint8_t)ExecuteChange(minutes_alarm, 0, 59, 48, 25);
-
-  RTC.setAlarm1(DateTime(0, 0, 0, alarm_h, alarm_m, 0), DS3231_A1_Hour);
-}
-*/
 
 // TODO: change stuff
 void DisableAlarm()
@@ -416,41 +221,44 @@ void BeepOnce(bool *beepstate)
   }
 }
 
-void DetermineState(menu *state, int X_Value, int Y_Value)
-{
+Direction readJoystick(int x, int y) {
+
+  int deadzone = 100;
+
+  // Deadzone check (joystick idle)
+  if (abs(x) < deadzone && abs(y) < deadzone)
+    return CENTER;
+
+  // Compare absolute values to determine dominant direction
+  if (abs(x) > abs(y)) {
+    return (x > 0) ? RIGHT : LEFT;
+  } else {
+    return (y < 0) ? UP : DOWN;
+  }
+}
+
+void DetermineState(menu *state, int Joystick_X, int Joystick_Y) {
 
   static bool BEEPSTATE;
+  Direction joystick_state;
+  joystick_state = readJoystick(Joystick_X, Joystick_Y);
 
   // upper and lower area of the joystick
-  if (Y_Value < upper_area_limit)
+  switch (joystick_state)
   {
+  case UP:
     BeepOnce(&BEEPSTATE);
     *state = ShowTimeAndDate;
-  }
-  else if (Y_Value > lower_area_limit)
-  {
-    BeepOnce(&BEEPSTATE);
-    *state = ChangeAlarm;
-  }
-  else if (X_Value < left_area_limit)
-  {
-    BeepOnce(&BEEPSTATE);
-    *state = StopAlarm;
-  }
-  else if (X_Value > right_area_limit)
-  {
+    break;
+  case RIGHT:
     BeepOnce(&BEEPSTATE);
     *state = ShowTempAndHum;
-  }
-  else
-  {
+    break;
+  default:
     BEEPSTATE = false;
+    break;
   }
 
-  if ((SW_Pin.debounce()) && (*state == ShowTimeAndDate))
-  {
-    *state = ChangeTimeDate;
-  }
 }
 
 void loop()
@@ -458,11 +266,11 @@ void loop()
 
   oled.clearDisplay();
 
-  static menu STATE;
+  static menu STATE = Idle;
   // read coordinates to determine the state
-  int X_Value = analogRead(Joystick_X);
-  int Y_Value = analogRead(Joystick_Y);
-  DetermineState(&STATE, X_Value, Y_Value);
+  int x = analogRead(Joystick_X) - 512; // Center around 0
+  int y = analogRead(Joystick_Y) - 512;
+  DetermineState(&STATE, x, y);
 
   switch (STATE)
   {
@@ -471,7 +279,9 @@ void loop()
     DisplayTimeDate();
     break;
   case ShowTempAndHum:
-    DisplayDHT();
+    // DisplayDHT();
+    oled.clearDisplay();
+    oled.print("AAAAAAA");
     break;
   case ChangeAlarm:
     // PrepareAlarm();
@@ -486,42 +296,4 @@ void loop()
     STATE = ShowTimeAndDate;
     break;
   }
-
-  // this works out but only for a few seconds, I'll need to make simple and repetitive melody
-  /*
-  if (alarm)
-  {
-    STATE = AlarmFiring;
-    oled.clearDisplay();
-    RTC.alarmFired(1);
-    oled.setCursor(0, 0);
-    oled.print("  ALARM IS FIRING");
-    oled.display();
-
-    int size = sizeof(durations) / sizeof(int);
-
-    for (int note = 0; note < size && alarm; note++)
-    {
-      // to calculate the note duration, take one second divided by the note type.
-      // e.g. quarter note = 1000 / 4, eighth note = 1000/8, etc.
-      int duration = 1000 / durations[note];
-      tone(Buzzer_Pin, melody[note], duration);
-
-      // to distinguish the notes, set a minimum time between them.
-      // the note's duration + 30% seems to work well:
-      int pauseBetweenNotes = duration * 1.30;
-      delay(pauseBetweenNotes);
-
-      // stop the tone playing:
-      noTone(Buzzer_Pin);
-    }
-
-    if (SW_Pin.debounce())
-    { RTC.clearAlarm(1);
-      alarm = false;
-      analogWrite(Buzzer_Pin, 0);
-      STATE = ShowTimeAndDate;
-    }
-  }
-  */
 }

@@ -1,0 +1,342 @@
+diff --git a/platformio.ini b/platformio.ini
+index e9fab8d..1faee40 100644
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -12,7 +12,6 @@
+ platform = atmelavr
+ board = uno
+ framework = arduino
+-upload_port = /dev/ttyACM0
+ lib_deps = 
+ 	adafruit/Adafruit SSD1306@^2.5.15
+ 	adafruit/DHT sensor library@^1.4.6
+diff --git a/src/main.cpp b/src/main.cpp
+index fecdf1e..ab4512b 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -158,218 +158,32 @@ void DisplayDHT()
+ void DisplayTimeDate()
+ {
+ 
+-  char buffer[80]; // this buffer is used for the strftime
++  char buffer[160]; // this buffer is used for the strftime
++  for (int i = 0; i < 160; i++) buffer[i] = 0;
+   // this is for each change in parameters of DateTime
+   DateTime now = RTC.now(); // (DateTime(year, month, day, hour, minutes, 0));
+ 
+-  struct tm date_and_time;
+-
+-  date_and_time.tm_hour = now.hour();
+-  date_and_time.tm_min = now.minute();
+-  date_and_time.tm_mday = now.day();
+-  date_and_time.tm_mon = now.month() - 1;
+-  date_and_time.tm_year = now.year() - 1900;
++  struct tm t = {0};
+ 
++  t.tm_year = now.year() - 1900;  // struct tm expects years since 1900
++  t.tm_mon  = now.month() - 1;    // struct tm expects months in [0, 11]
++  t.tm_mday = now.day();
++  t.tm_hour = now.hour();
++  t.tm_min  = now.minute();
++  t.tm_sec  = now.second();
++  t.tm_isdst = -1;
+   oled.clearDisplay();
+   oled.setCursor(0, 0);
+   oled.print("  TIME AND DATE");
+ 
+   oled.setCursor(20, 25);
+-  strftime(buffer, 80, "%H:%M \n %d/%m/%Y", &date_and_time);
++  strftime(buffer, 100, "%H:%M \n %d/%m/%Y\n", &t);
+   oled.print(buffer);
+-
++  oled.print(t.tm_year);
++  oled.print("\n");
+   oled.display();
+ }
+ 
+-// TODO: do a snprintf
+-/*
+-int ExecuteChange(int value, int min_value, int max_value, int cursor_x, int cursor_y)
+-{
+-
+-  while (!SW_Pin.debounce())
+-  {
+-
+-    oled.drawFastHLine(cursor_x, (cursor_y - 5), 11, 1); // draws an horizontal line with the cursors from input
+-    oled.display();
+-
+-    if ()
+-    {
+-
+-      // animation for the change of the hour
+-      oled.setCursor(cursor_x, cursor_y);
+-      oled.setTextColor(1, 0);
+-      oled.print("  ");
+-      oled.display();
+-
+-      oled.setCursor(cursor_x, cursor_y);
+-      oled.setTextColor(1);
+-
+-      // TODO: snprintf
+-      if (value >= 9)
+-      {
+-
+-        if (value == max_value)
+-        {
+-          value = min_value;
+-          oled.print("0");
+-          oled.print(value);
+-          oled.display();
+-        }
+-        else
+-        {
+-          value += 1;
+-          oled.print(value);
+-          oled.display();
+-        }
+-      }
+-      else
+-      {
+-
+-        oled.print("0");
+-        value += 1;
+-        oled.print(value);
+-        oled.display();
+-      }
+-    }
+-
+-    if (button_minus.debounce())
+-    {
+-
+-      // animation for the change of the hour
+-      oled.setCursor(cursor_x, cursor_y);
+-      oled.setTextColor(1, 0);
+-      oled.print("  ");
+-      oled.display();
+-
+-      oled.setCursor(cursor_x, cursor_y);
+-      oled.setTextColor(1);
+-
+-      if (value > 10)
+-      {
+-
+-        value -= 1;
+-        oled.print(value);
+-        oled.display();
+-      }
+-      else
+-      {
+-
+-        if (value == min_value)
+-        {
+-          value = max_value;
+-          oled.print(value);
+-          oled.display();
+-        }
+-        else
+-        {
+-          value -= 1;
+-          oled.print("0");
+-          oled.print(value);
+-          oled.display();
+-        }
+-      }
+-    }
+-  }
+-
+-  if (SW_Pin.debounce())
+-  {
+-    return value;
+-  }
+-}
+-
+-*/
+-
+-// TODO: use snprintf
+-/*
+-void ChangeTimeAndDate()
+-{
+-
+-  // this is for each change in parameters of DateTime
+-  DateTime now = RTC.now(); // (DateTime(year, month, day, hour, minutes, 0));
+-
+-  // TIME //
+-  oled.clearDisplay();
+-  oled.setCursor(0, 0);
+-  oled.print("TIME AND DATE SETTING");
+-  oled.setCursor(30, 25);
+-  if (now.hour() <= 9)
+-  {
+-    oled.print("0");
+-  }
+-  oled.print(now.hour());
+-  oled.print(":");
+-  if (now.minute() <= 9)
+-  {
+-    oled.print("0");
+-  }
+-  oled.print(now.minute());
+-  uint8_t current_hour = now.hour();
+-  uint8_t current_minutes = now.minute();
+-
+-  // DATE //
+-  oled.setCursor(20, 50);
+-  if (now.day() <= 9)
+-  {
+-    oled.print("0");
+-  }
+-  oled.print(now.day());
+-  oled.print("/");
+-  if (now.month() <= 9)
+-  {
+-    oled.print("0");
+-  }
+-  oled.print(now.month());
+-  oled.print("/");
+-  oled.print(now.year());
+-  oled.display();
+-
+-  uint8_t current_day = now.day();
+-  uint8_t current_month = now.month();
+-
+-  hour = ExecuteChange(current_hour, 0, 23, 30, 25);
+-  minutes = ExecuteChange(current_minutes, 0, 59, 48, 25);
+-  day = ExecuteChange(current_day, 1, 31, 20, 50);
+-  month = ExecuteChange(current_month, 1, 12, 38, 50);
+-  year += ExecuteChange(0, 0, 99, 68, 50);
+-  RTC.adjust(DateTime(year, month, day, hour, minutes, 0));
+-}
+-*/
+-
+-/*
+-void PrepareAlarm()
+-{
+-  // Declare an object of class TimeDate
+-  DateTime my_alarm = RTC.getAlarm1();
+-
+-  oled.clearDisplay();
+-  oled.setCursor(0, 0);
+-  oled.print("   ALARM SETTING");
+-
+-  uint8_t hour_alarm = my_alarm.hour();
+-  uint8_t minutes_alarm = my_alarm.minute();
+-
+-  oled.setCursor(30, 25);
+-  if (hour_alarm <= 9)
+-  {
+-    oled.print("0");
+-  }
+-  oled.print(hour_alarm);
+-
+-  oled.print(":");
+-
+-  if (minutes_alarm <= 9)
+-  {
+-    oled.print("0");
+-  }
+-  oled.print(minutes_alarm);
+-  oled.display();
+-
+-  alarm_h = (uint8_t)ExecuteChange(hour_alarm, 0, 23, 30, 25);
+-  alarm_m = (uint8_t)ExecuteChange(minutes_alarm, 0, 59, 48, 25);
+-
+-  RTC.setAlarm1(DateTime(0, 0, 0, alarm_h, alarm_m, 0), DS3231_A1_Hour);
+-}
+-*/
+ 
+ // TODO: change stuff
+ void DisableAlarm()
+@@ -416,8 +230,7 @@ void BeepOnce(bool *beepstate)
+   }
+ }
+ 
+-void DetermineState(menu *state, int X_Value, int Y_Value)
+-{
++void DetermineState(menu *state, int X_Value, int Y_Value) {
+ 
+   static bool BEEPSTATE;
+ 
+@@ -426,25 +239,30 @@ void DetermineState(menu *state, int X_Value, int Y_Value)
+   {
+     BeepOnce(&BEEPSTATE);
+     *state = ShowTimeAndDate;
++    return;
+   }
+   else if (Y_Value > lower_area_limit)
+   {
+     BeepOnce(&BEEPSTATE);
+     *state = ChangeAlarm;
++    return;
+   }
+   else if (X_Value < left_area_limit)
+   {
+     BeepOnce(&BEEPSTATE);
+     *state = StopAlarm;
++    return;
+   }
+   else if (X_Value > right_area_limit)
+   {
+     BeepOnce(&BEEPSTATE);
+     *state = ShowTempAndHum;
++    return;
+   }
+   else
+   {
+     BEEPSTATE = false;
++    return;
+   }
+ 
+   if ((SW_Pin.debounce()) && (*state == ShowTimeAndDate))
+@@ -458,7 +276,7 @@ void loop()
+ 
+   oled.clearDisplay();
+ 
+-  static menu STATE;
++  static menu STATE = Idle;
+   // read coordinates to determine the state
+   int X_Value = analogRead(Joystick_X);
+   int Y_Value = analogRead(Joystick_Y);
+@@ -486,42 +304,4 @@ void loop()
+     STATE = ShowTimeAndDate;
+     break;
+   }
+-
+-  // this works out but only for a few seconds, I'll need to make simple and repetitive melody
+-  /*
+-  if (alarm)
+-  {
+-    STATE = AlarmFiring;
+-    oled.clearDisplay();
+-    RTC.alarmFired(1);
+-    oled.setCursor(0, 0);
+-    oled.print("  ALARM IS FIRING");
+-    oled.display();
+-
+-    int size = sizeof(durations) / sizeof(int);
+-
+-    for (int note = 0; note < size && alarm; note++)
+-    {
+-      // to calculate the note duration, take one second divided by the note type.
+-      // e.g. quarter note = 1000 / 4, eighth note = 1000/8, etc.
+-      int duration = 1000 / durations[note];
+-      tone(Buzzer_Pin, melody[note], duration);
+-
+-      // to distinguish the notes, set a minimum time between them.
+-      // the note's duration + 30% seems to work well:
+-      int pauseBetweenNotes = duration * 1.30;
+-      delay(pauseBetweenNotes);
+-
+-      // stop the tone playing:
+-      noTone(Buzzer_Pin);
+-    }
+-
+-    if (SW_Pin.debounce())
+-    { RTC.clearAlarm(1);
+-      alarm = false;
+-      analogWrite(Buzzer_Pin, 0);
+-      STATE = ShowTimeAndDate;
+-    }
+-  }
+-  */
+ }
+\ No newline at end of file
