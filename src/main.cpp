@@ -6,7 +6,6 @@
 #include "pitches.h"
 #include "button.h"
 #include "nokia_melody.h"
-#include <time.h>
 
 // define the DHT
 #define DHTPIN 13 // pin connected to DHT11 sensor
@@ -30,6 +29,7 @@ Button SW_Pin; // switch pin
 
 // define an rtc object
 RTC_DS3231 RTC;
+
 // define the PIN connected to SQW
 const int CLOCK_INTERRUPT = 2;
 volatile bool alarm = false; // need a global variable here so I won't mess up the interrupt function
@@ -150,66 +150,61 @@ void DisplayTimeDate()
 
   oled.clearDisplay();
 
-  char buffer[19]; // this buffer is used for the strftime
-  for (int i = 0; i < 19; i++) buffer[i] = 0;
+  char buffer[19] = {0}; // this buffer is used for copying a certain format and then actual printing
   // this is for each change in parameters of DateTime
   DateTime now = RTC.now(); // (DateTime(year, month, day, hour, minutes, 0));
 
-  struct tm t;
-
-  t.tm_year = now.year() - 1900;  // struct tm expects years since 1900
-  t.tm_mon  = now.month() - 1;    // struct tm expects months in [0, 11]
-  t.tm_mday = now.day();
-  t.tm_hour = now.hour();
-  t.tm_min  = now.minute();
-  mktime(&t);
   oled.setCursor(0, 0);
   oled.print("  TIME AND DATE");
 
   oled.setCursor(20, 25);
-  strftime(buffer, 19, "%H:%M \n %d/%m/%Y", &t);
+
+  strcpy(buffer, "hh:mm \n DD/MM/YYYY");
+  now.toString(buffer);
   oled.print(buffer);
   oled.display();
 
 }
 
+// TODO → scriviamo la funzione che si occupa di cambiare il tempoi e data in base all'input dell'utente
+void ChangeTimeAndDate(DateTime now) {
 
+  // prima di tutto dobbiamo definire cosa faccio
+  // voglio cambiare un certo valore della struct in base agli input del joystick
 
+  // voglio definire un massimo e un minimo per ogni singolo valore della struct
+  // userò due array; e un contatore
+  int index;
 
-// TODO: change stuff
-void DisableAlarm()
-{
+  const int minVal[5] = {0, 0, 1, 1, 2000};
+  const int maxVal[5] = {23, 59, 31, 12, 2099};
 
-  // Declare an object of class TimeDate
-  DateTime MY_alarm = RTC.getAlarm1();
+  // mi permette la lettura del joystick
+  Direction joystick = readJoystick();
 
-  while (true)
+  // questi valori da modificare li memorizzo in un array
+  int valori[5];  // 0=ora, 1=minuti, 2=giorno, 3=mese, 4=anno
+
+  switch (joystick)
   {
-    oled.clearDisplay();
-    oled.setCursor(0, 0);
-    oled.print("WANT TO DISABLE ALARM?");
-
-    oled.setCursor(30, 25);
-    if (MY_alarm.hour() <= 9)
-    {
-      oled.print("0");
-    }
-    oled.print(MY_alarm.hour());
-
-    oled.print(":");
-
-    if (MY_alarm.minute() <= 9)
-    {
-      oled.print("0");
-    }
-    oled.print(MY_alarm.minute());
-
-    oled.setCursor(10, 50);
-    oled.print("YES (+)");
-
-    oled.display();
+  case UP:
+    (valori[index] == maxVal[index]+1) ? (valori[index] = minVal[index]) : valori[index]++; // TODO testare che sta roba funzioni
+    break;
+  case DOWN:
+    (valori[index] == minVal[index]-1) ? (valori[index] = maxVal[index]) : valori[index]--;
+    break;
+  case RIGHT:
+    index++;
+    break;
   }
+
+  // ogni volta che esco dallo switch faccio un lampeggio del dato che sto modificando
+
+
+  RTC.adjust();
+
 }
+
 
 void BeepOnce(bool *beepstate)
 {
@@ -279,16 +274,13 @@ void loop()
     DisplayTimeDate();
     break;
   case ShowTempAndHum:
-    // DisplayDHT();
-    oled.clearDisplay();
-    oled.print("AAAAAAA");
+    DisplayDHT();
     break;
   case ChangeAlarm:
     // PrepareAlarm();
     STATE = ShowTimeAndDate;
     break;
   case StopAlarm:
-    DisableAlarm();
     STATE = ShowTimeAndDate;
     break;
   case ChangeTimeDate:
