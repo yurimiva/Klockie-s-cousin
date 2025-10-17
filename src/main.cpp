@@ -112,6 +112,23 @@ void setup()
 }
 
 
+Direction readJoystick(int x, int y) {
+
+  int deadzone = 100;
+
+  // Deadzone check (joystick idle)
+  if (abs(x) < deadzone && abs(y) < deadzone)
+    return CENTER;
+
+  // Compare absolute values to determine dominant direction
+  if (abs(x) > abs(y)) {
+    return (x > 0) ? RIGHT : LEFT;
+  } else {
+    return (y < 0) ? UP : DOWN;
+  }
+}
+
+
 void DisplayDHT()
 {
 
@@ -144,13 +161,12 @@ void DisplayDHT()
 }
 
 
-// TODO: test strftime
 void DisplayTimeDate()
 {
 
   oled.clearDisplay();
 
-  char buffer[19] = {0}; // this buffer is used for copying a certain format and then actual printing
+  char buffer[20] = {0}; // this buffer is used for copying a certain format and then actual printing
   // this is for each change in parameters of DateTime
   DateTime now = RTC.now(); // (DateTime(year, month, day, hour, minutes, 0));
 
@@ -159,50 +175,109 @@ void DisplayTimeDate()
 
   oled.setCursor(20, 25);
 
-  strcpy(buffer, "hh:mm \n DD/MM/YYYY");
+  strcpy(buffer, "hh:mm\nDD/MM/YYYY");
   now.toString(buffer);
   oled.print(buffer);
+  oled.print("\n");
+  oled.print(now.month());
   oled.display();
 
 }
 
-// TODO → scriviamo la funzione che si occupa di cambiare il tempoi e data in base all'input dell'utente
-void ChangeTimeAndDate(DateTime now) {
+// TODO verificare cosa non funzioni di preciso
+void aggiornaDisplay(int valori[], int index) {
+
+  // lampeggio stateless: alterna ogni 500ms
+  bool blink = ((millis() / 500) % 2);
+
+  char displayBuffer[20];
+
+  // scrive direttamente tutto il buffer con padding
+  snprintf(displayBuffer, sizeof(displayBuffer), "%02d:%02d\n%02d/%02d/%04d",
+           valori[0], valori[1],
+           valori[2], valori[3], valori[4]);
+
+  // definizione start/length di ogni campo nel buffer
+  const int startIndex[5] = {0, 3, 6, 9, 12}; // hh, mm, DD, MM, YYYY
+  const int length[5]     = {2, 2, 2, 2, 4};
+
+  // lampeggio: sostituisce i caratteri del campo corrente con spazi
+  if (!blink) {
+      for (int i = 0; i < length[index]; i++)
+          displayBuffer[startIndex[index] + i] = ' ';
+  }
+
+  // stampa su OLED
+  oled.clearDisplay();
+  oled.setCursor(0,0);
+  oled.print("   CHANGE MODE");
+
+  oled.setCursor(20, 25);
+  oled.print(displayBuffer);
+
+  oled.display();
+}
+
+
+void ChangeTimeAndDate() {
+
+  oled.clearDisplay();
+  oled.setCursor(0,0);
+  oled.print("   CHANGE MODE");
 
   // prima di tutto dobbiamo definire cosa faccio
-  // voglio cambiare un certo valore della struct in base agli input del joystick
+  // voglio cambiare un certo valore presente in DateTime in base agli input del joystick
 
   // voglio definire un massimo e un minimo per ogni singolo valore della struct
   // userò due array; e un contatore
-  int index;
-
+  int index = 0;
   const int minVal[5] = {0, 0, 1, 1, 2000};
   const int maxVal[5] = {23, 59, 31, 12, 2099};
 
-  // mi permette la lettura del joystick
-  Direction joystick = readJoystick();
+  DateTime now = RTC.now();
+
+  // importo una variabile in modo da poter continuare la modifca del dato
+  // TODO testare questa cosa
+
+  bool modificaCompleta = false;
 
   // questi valori da modificare li memorizzo in un array
-  int valori[5];  // 0=ora, 1=minuti, 2=giorno, 3=mese, 4=anno
+  int valori[5] = {now.hour(), now.minute(), now.day(), now.month(), now.year()};  
 
-  switch (joystick)
-  {
-  case UP:
-    (valori[index] == maxVal[index]+1) ? (valori[index] = minVal[index]) : valori[index]++; // TODO testare che sta roba funzioni
-    break;
-  case DOWN:
-    (valori[index] == minVal[index]-1) ? (valori[index] = maxVal[index]) : valori[index]--;
-    break;
-  case RIGHT:
-    index++;
-    break;
+  while (!modificaCompleta) {
+
+    int xVal = analogRead(Joystick_X) - 512; // Center around 0
+    int yVal = analogRead(Joystick_Y) - 512;
+    Direction joystick = readJoystick(xVal, yVal);
+
+    switch (joystick)
+    {
+    case UP:
+      (valori[index] >= maxVal[index]) ? (valori[index] = minVal[index]) : valori[index]++; // TODO testare che sta roba funzioni
+      break;
+    case DOWN:
+      (valori[index] <= minVal[index]) ? (valori[index] = maxVal[index]) : valori[index]--;
+      break;
+    case RIGHT:
+      index++;
+      break;
+    case LEFT:
+      index--;
+      break;
+    default:
+      break;
+    }
+
+    if (index >= 5) {
+      index = 0;
+      modificaCompleta = true;
+      RTC.adjust(DateTime(valori[4], valori[3], valori[2], valori[1], valori[0], 0));
+      break;
+    }
+
+    aggiornaDisplay(valori, index);
+    delay(150);
   }
-
-  // ogni volta che esco dallo switch faccio un lampeggio del dato che sto modificando
-
-
-  RTC.adjust();
-
 }
 
 
@@ -216,21 +291,6 @@ void BeepOnce(bool *beepstate)
   }
 }
 
-Direction readJoystick(int x, int y) {
-
-  int deadzone = 100;
-
-  // Deadzone check (joystick idle)
-  if (abs(x) < deadzone && abs(y) < deadzone)
-    return CENTER;
-
-  // Compare absolute values to determine dominant direction
-  if (abs(x) > abs(y)) {
-    return (x > 0) ? RIGHT : LEFT;
-  } else {
-    return (y < 0) ? UP : DOWN;
-  }
-}
 
 void DetermineState(menu *state, int Joystick_X, int Joystick_Y) {
 
@@ -256,6 +316,7 @@ void DetermineState(menu *state, int Joystick_X, int Joystick_Y) {
 
 }
 
+
 void loop()
 {
 
@@ -272,6 +333,9 @@ void loop()
   case Idle:
   case ShowTimeAndDate:
     DisplayTimeDate();
+    if (SW_Pin.debounce()) {
+      STATE = ChangeTimeDate;
+    }
     break;
   case ShowTempAndHum:
     DisplayDHT();
@@ -284,8 +348,8 @@ void loop()
     STATE = ShowTimeAndDate;
     break;
   case ChangeTimeDate:
-    // ChangeTimeAndDate();
-    STATE = ShowTimeAndDate;
+    ChangeTimeAndDate();
+    STATE = ShowTempAndHum;
     break;
   }
 }
