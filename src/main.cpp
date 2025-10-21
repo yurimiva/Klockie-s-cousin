@@ -8,7 +8,7 @@
 #include "nokia_melody.h"
 
 // define the DHT
-#define DHTPIN 13 // pin connected to DHT11 sensor
+#define DHTPIN 7 // pin connected to DHT11 sensor
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
 
@@ -34,10 +34,6 @@ RTC_DS3231 RTC;
 const int CLOCK_INTERRUPT = 2;
 volatile bool alarm = false; // need a global variable here so I won't mess up the interrupt function
 
-// define global variables for the alarm
-uint8_t alarm_h;
-uint8_t alarm_m;
-
 // define buzzer
 const int Buzzer_Pin = 10;
 
@@ -45,13 +41,15 @@ const int Buzzer_Pin = 10;
 
 enum menu
 {
-  Idle,
-  ShowTimeAndDate,
-  ShowTempAndHum,
-  ChangeAlarm,
+  Idle, // fatto
+  ShowTimeAndDate, // fatto
+  ChangeTimeDate, // fatto
+  ShowTempAndHum, // fatto
+  ShowAlarm, // sto facendo
+  changeAlarm,
   StopAlarm,
-  ChangeTimeDate,
-  // AlarmFiring
+  ShowTimer,
+  ChangeTimer
 };
 
 // ---
@@ -85,9 +83,6 @@ void setup()
 
   // buzzer
   pinMode(Buzzer_Pin, OUTPUT);
-
-  // testing
-  pinMode(LED_BUILTIN, OUTPUT);
 
   // initialize the RTC
   RTC.begin();
@@ -131,60 +126,58 @@ Direction readJoystick(int x, int y) {
 
 void DisplayDHT()
 {
-
-  // read temp and hum
+  // Leggi temperatura e umidità
   int temperature = (int)dht.readTemperature();
   int humidity = (int)dht.readHumidity();
 
-  // how I want my oled
+  char buffer[32];
+
+  // Titolo
   oled.clearDisplay();
-
-  // printing stuff
+  snprintf(buffer, sizeof(buffer), "  TEMP. & HUMIDITY");
   oled.setCursor(0, 0);
-  oled.print("  TEMP. & HUMIDITY");
+  oled.print(buffer);
 
+  // Temperatura
+  snprintf(buffer, sizeof(buffer), " TEMPERATURE : %d C", temperature);
   oled.setCursor(0, 25);
-  oled.print(" TEMPERATURE : ");
+  oled.print(buffer);
 
-  oled.setCursor(90, 25);
-  oled.print(temperature);
-  oled.print(" C ");
-
+  // Umidità
+  snprintf(buffer, sizeof(buffer), " HUMIDITY    : %d %%", humidity);
   oled.setCursor(0, 50);
-  oled.print(" HUMIDITY  : ");
+  oled.print(buffer);
 
-  oled.setCursor(90, 50);
-  oled.print(humidity);
-  oled.print(" % ");
-
+  // Invio al display
   oled.display();
+
 }
 
 
 void DisplayTimeDate()
 {
-
-  oled.clearDisplay();
-
-  char buffer[20] = {0}; // this buffer is used for copying a certain format and then actual printing
+  char buffer[32] = {0}; // this buffer is used for copying a certain format and then actual printing
   // this is for each change in parameters of DateTime
   DateTime now = RTC.now(); // (DateTime(year, month, day, hour, minutes, 0));
+  delay(3);
 
+  snprintf(buffer, sizeof(buffer), "%02d:%02d\n%02d/%02d/%04d",
+             now.hour(), now.minute(),
+             now.day(), now.month(), now.year());
+
+  oled.clearDisplay();
   oled.setCursor(0, 0);
   oled.print("  TIME AND DATE");
-
+ 
   oled.setCursor(20, 25);
-
-  strcpy(buffer, "hh:mm\nDD/MM/YYYY");
-  now.toString(buffer);
   oled.print(buffer);
-  oled.print("\n");
-  oled.print(now.month());
+
+  delay(3);
   oled.display();
 
 }
 
-// TODO verificare cosa non funzioni di preciso
+// Permette di fare l'animazione su OLED
 void aggiornaDisplay(int valori[], int index) {
 
   // lampeggio stateless: alterna ogni 500ms
@@ -215,15 +208,31 @@ void aggiornaDisplay(int valori[], int index) {
   oled.setCursor(20, 25);
   oled.print(displayBuffer);
 
+  delay(3);
   oled.display();
 }
 
 
-void ChangeTimeAndDate() {
+// Restituisce il numero massimo di giorni di un dato mese e anno (usata per la normalizzazione)
+int maxGiorni(int mese, int anno) {
+  switch (mese) {
+      case 1: case 3: case 5: case 7: case 8: case 10: case 12:
+          return 31; // mesi con 31 giorni
+      case 4: case 6: case 9: case 11:
+          return 30; // mesi con 30 giorni
+      case 2:
+          // febbraio: controlla anno bisestile
+          if ((anno % 4 == 0 && anno % 100 != 0) || (anno % 400 == 0))
+              return 29; // anno bisestile
+          else
+              return 28; // anno normale
+      default:
+          return 31; // fallback
+  }
+}
 
-  oled.clearDisplay();
-  oled.setCursor(0,0);
-  oled.print("   CHANGE MODE");
+
+void ChangeTimeAndDate() {
 
   // prima di tutto dobbiamo definire cosa faccio
   // voglio cambiare un certo valore presente in DateTime in base agli input del joystick
@@ -235,6 +244,7 @@ void ChangeTimeAndDate() {
   const int maxVal[5] = {23, 59, 31, 12, 2099};
 
   DateTime now = RTC.now();
+  delay(3);
 
   // importo una variabile in modo da poter continuare la modifca del dato
   // TODO testare questa cosa
@@ -242,7 +252,16 @@ void ChangeTimeAndDate() {
   bool modificaCompleta = false;
 
   // questi valori da modificare li memorizzo in un array
-  int valori[5] = {now.hour(), now.minute(), now.day(), now.month(), now.year()};  
+  int valori[5] = {now.hour(), now.minute(), now.day(), now.month(), now.year()};
+  
+  // normalizzazione giorno-mese iniziale
+  int giorniMax = maxGiorni(valori[3], valori[4]);
+  if(valori[2] < minVal[2]) valori[2] = minVal[2];
+  if(valori[2] > giorniMax) valori[2] = giorniMax;
+
+  oled.clearDisplay();
+  oled.setCursor(0,0);
+  oled.print("   CHANGE MODE");
 
   while (!modificaCompleta) {
 
@@ -264,20 +283,118 @@ void ChangeTimeAndDate() {
     case LEFT:
       index--;
       break;
-    default:
-      break;
     }
 
     if (index >= 5) {
       index = 0;
       modificaCompleta = true;
-      RTC.adjust(DateTime(valori[4], valori[3], valori[2], valori[1], valori[0], 0));
       break;
     }
 
     aggiornaDisplay(valori, index);
     delay(150);
   }
+
+  // normalizzazione finale
+  giorniMax = maxGiorni(valori[3], valori[4]);
+  if(valori[2] < minVal[2]) valori[2] = minVal[2];
+  if(valori[2] > giorniMax) valori[2] = giorniMax;
+
+  // faccio anche l'adjust con cui salco i dati normalizzati
+  RTC.adjust(DateTime(valori[4], valori[3], valori[2], valori[0], valori[1], 0));
+  delay(3);
+
+}
+
+
+void ChangeAlarm() {
+  oled.clearDisplay();
+  oled.setCursor(0,0);
+  oled.print("   CHANGE ALARM");
+  oled.display();
+
+  int index = 0;  // 0 = ore, 1 = minuti
+  int valori[2] = {RTC.getAlarm1().hour(), RTC.getAlarm1().minute()};
+  const int minVal[2] = {0,0}, maxVal[2] = {23,59};
+  bool done = false;
+
+  unsigned long lastBlink = 0;
+  bool blink = false;
+
+  while(!done) {
+      // Aggiorna lampeggio ogni 500ms
+      if(millis() - lastBlink > 500) {
+          lastBlink = millis();
+          blink = !blink;
+      }
+
+      // Leggi joystick
+      Direction dir = readJoystick(analogRead(Joystick_X)-512, analogRead(Joystick_Y)-512);
+      switch(dir) {
+          case UP:    
+              valori[index] = (valori[index] >= maxVal[index]) ? minVal[index] : valori[index]+1; 
+              break;
+          case DOWN:  
+              valori[index] = (valori[index] <= minVal[index]) ? maxVal[index] : valori[index]-1; 
+              break;
+          case RIGHT:
+          case LEFT:  
+              index = (index+1)%2;  // passa da ore a minuti
+              break;
+          default: break;
+      }
+
+      // Disegna campo lampeggiante solo sul campo attivo
+      oled.fillRect(20, 25, 40, 10, SSD1306_BLACK); // cancella area numeri
+      oled.setCursor(20,25);
+      char buf[6];
+
+      if(index == 0) { // lampeggia solo le ore
+          snprintf(buf,sizeof(buf),"%s:%02d", blink ? "  " : String(valori[0]).c_str(), valori[1]);
+      } else {        // lampeggia solo i minuti
+          snprintf(buf,sizeof(buf),"%02d:%s", valori[0], blink ? "  " : String(valori[1]).c_str());
+      }
+      oled.print(buf);
+      oled.display();
+
+      // Uscita con pulsante
+      if(SW_Pin.debounce()) done = true;
+
+      delay(50); // piccolo delay per stabilità display
+  }
+
+  // Imposta Alarm1 con i valori scelti
+  RTC.setAlarm1(DateTime(0,0,0,valori[0],valori[1],0), DS3231_A1_Hour);
+  RTC.clearAlarm(1);
+
+  // Messaggio conferma
+  oled.fillRect(0,25,128,16,SSD1306_BLACK);
+  oled.setCursor(20,25);
+  oled.print("ALARM SET!");
+  oled.display();
+  delay(1000);
+}
+
+
+void DisplayAlarm() {
+
+  // Leggi i valori correnti della sveglia (Alarm1)
+  DateTime alarm1 = RTC.getAlarm1();
+  delay(3);
+  
+  // Mostra su OLED
+  oled.clearDisplay();
+  oled.setCursor(0, 0);
+  oled.print("     ALARM 1");
+  
+  oled.setCursor(20, 25);
+  char buf[10] = {0};
+  snprintf(buf, sizeof(buf), "%02d:%02d", alarm1.hour(), alarm1.minute());
+  oled.print(buf);
+  
+  delay(3);
+  oled.display();
+
 }
 
 
@@ -309,6 +426,10 @@ void DetermineState(menu *state, int Joystick_X, int Joystick_Y) {
     BeepOnce(&BEEPSTATE);
     *state = ShowTempAndHum;
     break;
+  case DOWN:
+    BeepOnce(&BEEPSTATE);
+    *state = ShowAlarm;
+    break;
   default:
     BEEPSTATE = false;
     break;
@@ -330,26 +451,27 @@ void loop()
 
   switch (STATE)
   {
-  case Idle:
   case ShowTimeAndDate:
     DisplayTimeDate();
-    if (SW_Pin.debounce()) {
-      STATE = ChangeTimeDate;
-    }
+    if (SW_Pin.debounce()) STATE = ChangeTimeDate;
     break;
   case ShowTempAndHum:
     DisplayDHT();
     break;
-  case ChangeAlarm:
-    // PrepareAlarm();
-    STATE = ShowTimeAndDate;
+  case ShowAlarm:
+    DisplayAlarm();
+    if (SW_Pin.debounce()) STATE = changeAlarm;
     break;
   case StopAlarm:
     STATE = ShowTimeAndDate;
     break;
   case ChangeTimeDate:
     ChangeTimeAndDate();
-    STATE = ShowTempAndHum;
+    STATE = ShowTimeAndDate;
+    break;
+  case changeAlarm:
+    ChangeAlarm();
+    STATE = ShowAlarm;
     break;
   }
 }
