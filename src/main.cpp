@@ -31,7 +31,8 @@ RTC_DS3231 RTC;
 
 // define the PIN connected to SQW
 const int SQW_INTERRUPT = 2;
-volatile bool alarm = false; // need a global variable here so I won't mess up the interrupt function
+volatile bool alarm1Triggered = false;
+volatile bool alarm2Triggered = false;
 
 // define buzzer
 const int Buzzer_Pin = 8;
@@ -53,7 +54,6 @@ enum menu
   ShowTempAndHum, // fatto
   ShowAlarm, // fatto
   changeAlarm, // fatto
-  StopAlarm, // da fare
   ShowTimer, // sto facendo
   changeTimer // sto facendo
 };
@@ -61,12 +61,10 @@ enum menu
 // ---
 
 // ISR function
-void onAlarm()
-{
-
-  alarm = true;
+void onAlarm() {
+  if (RTC.alarmFired(1)) alarm1Triggered = true;
+  if (RTC.alarmFired(2)) alarm2Triggered = true;
 }
-
 
 void setup()
 {
@@ -396,8 +394,6 @@ void ChangeAlarm() {
 }
 
 
-// -------------------- TIMER --------------------
-// Questa funzione serve per impostare il timer
 void ChangeTimer(Timer &t) {
   int values[2]  = {0, 0};
   int minVals[2] = {0, 0};
@@ -420,10 +416,79 @@ void ChangeTimer(Timer &t) {
 }
 
 // --------
+// Functions for handling the alarms
+void PlayMelody(const int *melody, const int *durations, int length) {
+  for (int i = 0; i < length; i++) {
+    int noteDuration = 1000 / durations[i];
+    tone(Buzzer_Pin, melody[i], noteDuration);
+    delay(noteDuration * 1.3);
+  }
+  noTone(Buzzer_Pin);
+}
+
+
+void HandleWakeup() {
+  oled.clearDisplay();
+  oled.setCursor(10, 20);
+  oled.print("ALARM RINGING!");
+  oled.display();
+
+  // Esegui melodia sveglia finché non viene premuto il joystick
+  while (!SW_Pin.debounce()) {
+    PlayMelody(alarm_melody, alarm_NoteDurations);
+  }
+
+  noTone(Buzzer_Pin);
+  RTC.disableAlarm(1); // disattiva l’allarme fino a nuovo set
+  oled.clearDisplay();
+  oled.setCursor(10, 25);
+  oled.print("ALARM STOPPED");
+  oled.display();
+  delay(1000);
+}
+
+
+void HandleTimerDone() {
+  oled.clearDisplay();
+  oled.setCursor(10, 20);
+  oled.print("TIMER DONE!");
+  oled.display();
+
+  // Melodia del timer finché non premi joystick
+  while (!SW_Pin.debounce()) {
+    PlayMelody(timer_melody, timer_noteDurations);
+  }
+
+  noTone(Buzzer_Pin);
+  RTC.disableAlarm(2); // disattiva il timer
+  oled.clearDisplay();
+  oled.setCursor(10, 25);
+  oled.print("TIMER STOPPED");
+  oled.display();
+  delay(1000);
+}
+
+
+void HandleAlarms() {
+  if (alarm1Triggered) {
+    alarm1Triggered = false;
+    RTC.clearAlarm(1);
+    HandleWakeup();  // funzione separata per la sveglia
+  }
+
+  if (alarm2Triggered) {
+    alarm2Triggered = false;
+    RTC.clearAlarm(2);
+    HandleTimerDone();  // funzione separata per il timer
+  }
+}
+
+
 
 void loop()
 {
 
+  HandleAlarms();
   oled.clearDisplay();
 
   static menu STATE = Idle;
@@ -457,10 +522,6 @@ void loop()
   case ShowTimer:
     UpdateTimerDisplay(timer);
     if (SW_Pin.debounce()) STATE = changeTimer;
-    break;
-
-  case StopAlarm:
-    STATE = ShowTimeAndDate;
     break;
 
   case ChangeTimeDate:
