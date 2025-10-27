@@ -30,11 +30,18 @@ Button SW_Pin; // switch pin
 RTC_DS3231 RTC;
 
 // define the PIN connected to SQW
-const int CLOCK_INTERRUPT = 2;
+const int SQW_INTERRUPT = 2;
 volatile bool alarm = false; // need a global variable here so I won't mess up the interrupt function
 
 // define buzzer
-const int Buzzer_Pin = 10;
+const int Buzzer_Pin = 8;
+
+// a struct for the timer is needed since I'll treat it as a second alarm
+struct Timer {
+  DateTime endTime;  // momento in cui scade il timer
+  bool running;      // true se countdown attivo
+  bool done;         // true se scaduto
+};
 
 // need to set an enumerable that helps me with the display of the modes
 
@@ -85,20 +92,17 @@ void setup()
 
   // setup for the SQW PIN
   // Making it so, that the alarm will trigger an interrupt
-  pinMode(CLOCK_INTERRUPT, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(CLOCK_INTERRUPT), onAlarm, FALLING);
+  pinMode(SQW_INTERRUPT, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(SQW_INTERRUPT), onAlarm, FALLING);
 
   // set alarm 1 flag to false (so alarm 1 didn't happen so far)
   // if not done, this easily leads to problems, as the register isn't reset on reboot/recompile
-  RTC.disableAlarm(1);
   RTC.clearAlarm(1);
+  RTC.clearAlarm(2);
 
   // stop oscillating signals at SQW Pin
   // otherwise setAlarm1 will fail
   RTC.writeSqwPinMode(DS3231_OFF);
-
-  RTC.clearAlarm(2); // we won't use it, but still best to avoid problems
-  RTC.disableAlarm(2);
 }
 
 
@@ -163,15 +167,27 @@ void DetermineState(menu *state, int Joystick_X, int Joystick_Y) {
 
 
 // ALL OF THE DISPLAY FUNCTIONS ON OLED
-
-// TODO: capire come mai il display di temp e hum è bloccante
 void DisplayDHT()
 {
 
-  int chk = DHT.read11(DHTPIN);
-  // Leggi temperatura e umidità
-  int temperature = (int)DHT.getTemperature();
-  int humidity = (int)DHT.getHumidity();
+  // mi assicura che gli input del DHT siano letti solo dopo che è passato un certo tempo
+  // evita così dati corrotti
+  static unsigned long lastReadTime = 0;
+
+  static int lastTemperature = 0;
+  static int lastHumidity = 0;
+
+  unsigned long now = millis();
+
+  // Leggi il sensore solo ogni 2 secondi
+  if (now - lastReadTime > 2000) {
+    int chk = DHT.read11(DHTPIN);
+    if (chk == DHTLIB_OK) {
+      lastTemperature = (int)DHT.getTemperature();
+      lastHumidity = (int)DHT.getHumidity();
+    }
+    lastReadTime = now;
+  }
 
   char buffer[32];
 
@@ -182,12 +198,12 @@ void DisplayDHT()
   oled.print(buffer);
 
   // Temperatura
-  snprintf(buffer, sizeof(buffer), " TEMPERATURE : %d C", temperature);
+  snprintf(buffer, sizeof(buffer), " TEMPERATURE : %d C", lastTemperature);
   oled.setCursor(0, 25);
   oled.print(buffer);
 
   // Umidità
-  snprintf(buffer, sizeof(buffer), " HUMIDITY    : %d %%", humidity);
+  snprintf(buffer, sizeof(buffer), " HUMIDITY    : %d %%", lastHumidity);
   oled.setCursor(0, 50);
   oled.print(buffer);
 
@@ -239,6 +255,40 @@ void DisplayAlarm() {
 }
 
 
+// Questa funzione va chiamata ogni ciclo del loop per aggiornare il display
+void UpdateTimerDisplay(Timer &t) {
+  DateTime now = RTC.now();
+
+  oled.clearDisplay();
+  oled.setCursor(0, 0);
+  oled.print("   TIMER");
+
+  if (!t.running && !t.done) {
+    // nessun timer impostato
+    oled.setCursor(20, 25);
+    oled.print("No timer set");
+  } else {
+    TimeSpan remaining = t.endTime - now;
+
+    if (remaining.totalseconds() <= 0) {
+      t.running = false;
+      t.done = true;
+      tone(Buzzer_Pin, 1047); // beep
+      remaining = TimeSpan(0); // evita valori negativi
+    }
+
+    char buf[9];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
+             remaining.hours(), remaining.minutes(), remaining.seconds());
+    oled.setCursor(20, 25);
+    oled.print(buf);
+  }
+
+  oled.display();
+}
+
+
+
 // ALL CHANGE FUNCTIONS
 void DisplayChange(const char* title, int* values, int numFields) {
 
@@ -271,6 +321,7 @@ void DisplayChange(const char* title, int* values, int numFields) {
   oled.print(buf);
   oled.display();
 }
+
 
 void ChangeValue(int* values, int* minVals, int* maxVals, int numFields, const char* title) {
 
@@ -344,78 +395,28 @@ void ChangeAlarm() {
 
 }
 
-// ------ Need to change stuff under there
 
-DateTime timerEnd;
-bool timerRunning = false;
+// -------------------- TIMER --------------------
+// Questa funzione serve per impostare il timer
+void ChangeTimer(Timer &t) {
+  int values[2]  = {0, 0};
+  int minVals[2] = {0, 0};
+  int maxVals[2] = {23, 59};
 
+  // input dell’utente con cursore
+  ChangeValue(values, minVals, maxVals, 2, "SET TIMER");
 
-// 2️⃣ Calcola momento di scadenza
-void StartTimer(int hours, int minutes) {
-  DateTime now = RTC.now();
-  timerEnd = now + TimeSpan(hours, minutes, 0, 0); // somma ore e minuti
-  timerRunning = true;
-}
+  // calcola momento di fine timer
+  t.endTime = RTC.now() + TimeSpan(0, values[0], values[1], 0);
+  t.running = true;
+  t.done = false;
 
-
-// 1️⃣ Imposta il timer
-void ChangeTimer() {
-    int h = 0;
-    int m = 0;
-    bool done = false;
-    int index = 0;
-
-    while(!done) {
-        Direction dir = readJoystick(analogRead(Joystick_X)-512, analogRead(Joystick_Y)-512);
-
-        switch(dir) {
-            case UP:    if(index==0) h = (h>=23)?0:h+1; else m = (m>=59)?0:m+1; break;
-            case DOWN:  if(index==0) h = (h<=0)?23:h-1; else m = (m<=0)?59:m-1; break;
-            case RIGHT:
-            case LEFT:  index = (index+1)%2; break;
-            default: break;
-        }
-
-        // Stampa sul display
-        oled.clearDisplay();
-        oled.setCursor(20,25);
-        char buf[8];
-        snprintf(buf,sizeof(buf),"%02d:%02d", h, m);
-        oled.print(buf);
-        oled.display();
-
-        if(SW_Pin.debounce()) done = true;
-        delay(50);
-    }
-
-    // Avvia il timer
-    StartTimer(h, m);
-}
-
-// 3️⃣ Aggiorna il timer sul display
-void UpdateTimerDisplay() {
-    if(!timerRunning) return;
-
-    DateTime now = RTC.now();
-    TimeSpan remaining = timerEnd - now;
-
-    oled.clearDisplay();
-    oled.setCursor(20,25);
-
-    if(remaining.totalseconds() <= 0) {
-        oled.print("TIMER DONE!");
-        tone(Buzzer_Pin, 1047, 500); // beep
-        timerRunning = false;
-    } else {
-        int h = remaining.hours();
-        int m = remaining.minutes();
-        int s = remaining.seconds();
-        char buf[9];
-        snprintf(buf,sizeof(buf),"%02d:%02d:%02d", h, m, s);
-        oled.print(buf);
-    }
-
-    oled.display();
+  // feedback breve
+  oled.clearDisplay();
+  oled.setCursor(20, 25);
+  oled.print("TIMER STARTED");
+  oled.display();
+  delay(500);
 }
 
 // --------
@@ -431,6 +432,9 @@ void loop()
   int y = analogRead(Joystick_Y) - 512;
   DetermineState(&STATE, x, y);
 
+  static Timer timer; // mantiene lo stato del timer tra i cicli
+
+
   switch (STATE)
   {
   case Idle:
@@ -443,12 +447,16 @@ void loop()
 
   case ShowTempAndHum:
     DisplayDHT();
-    delay(150);
     break;
 
   case ShowAlarm:
     DisplayAlarm();
     if (SW_Pin.debounce()) STATE = changeAlarm;
+    break;
+
+  case ShowTimer:
+    UpdateTimerDisplay(timer);
+    if (SW_Pin.debounce()) STATE = changeTimer;
     break;
 
   case StopAlarm:
@@ -465,12 +473,8 @@ void loop()
     STATE = ShowAlarm;
     break;
 
-  case ShowTimer:
-    UpdateTimerDisplay();
-    break;
-
   case changeTimer:
-    ChangeTimer();
+    ChangeTimer(timer);
     STATE = ShowTimer;
     break;
   }
