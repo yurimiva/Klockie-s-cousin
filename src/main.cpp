@@ -1,20 +1,17 @@
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <U8g2lib.h>
 #include <DHTStable.h>
 #include <RTClib.h>
 #include "pitches.h"
 #include "button.h"
-#include "nokia_melody.h"
+#include "melodies.h"
 
 // define the DHT
 #define DHTPIN 7 // pin connected to DHT11 sensor
 DHTStable DHT;
 
-// define the OLED
-#define screen_width 128 // OLED display width, in pixels
-#define screen_height 64 // OLED display height, in pixels
-Adafruit_SSD1306 oled(screen_width, screen_height, &Wire, -1);
+// define the OLED (U8g2 version)
+U8G2_SSD1306_128X64_NONAME_1_HW_I2C oled(U8G2_R0, U8X8_PIN_NONE);
 
 // define the joystick
 const int Joystick_X = 14;
@@ -62,18 +59,23 @@ enum menu
 
 // ISR function
 void onAlarm() {
-  if (RTC.alarmFired(1)) alarm1Triggered = true;
-  if (RTC.alarmFired(2)) alarm2Triggered = true;
+  alarm1Triggered = true;
+  alarm2Triggered = true;
 }
 
 void setup()
 {
-  // initialize the oled
-  oled.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  oled.clearDisplay();
-  oled.setTextSize(1);
-  oled.setTextColor(SSD1306_WHITE);
+  // Initialazing oled with U8g2
+  oled.begin();
 
+  // Mostra messaggio di setup
+  oled.firstPage();
+  do {
+    oled.setFont(u8g2_font_6x12_tf); // font leggibile e piccolo
+    oled.drawStr(0, 12, "Setup OK!");
+  } while (oled.nextPage());
+  delay(500);
+  
   // coordinates for joystick
   pinMode(Joystick_X, INPUT);
   pinMode(Joystick_Y, INPUT);
@@ -101,6 +103,7 @@ void setup()
   // stop oscillating signals at SQW Pin
   // otherwise setAlarm1 will fail
   RTC.writeSqwPinMode(DS3231_OFF);
+
 }
 
 
@@ -189,26 +192,25 @@ void DisplayDHT()
 
   char buffer[32];
 
-  // Titolo
-  oled.clearDisplay();
-  snprintf(buffer, sizeof(buffer), "  TEMP. & HUMIDITY");
-  oled.setCursor(0, 0);
-  oled.print(buffer);
+  oled.firstPage();
+  do {
+    oled.setFont(u8g2_font_6x12_tf); // font compatto e chiaro
 
-  // Temperatura
-  snprintf(buffer, sizeof(buffer), " TEMPERATURE : %d C", lastTemperature);
-  oled.setCursor(0, 25);
-  oled.print(buffer);
+    // Titolo
+    oled.drawStr(0, 12, "TEMP. & HUMIDITY");
 
-  // Umidità
-  snprintf(buffer, sizeof(buffer), " HUMIDITY    : %d %%", lastHumidity);
-  oled.setCursor(0, 50);
-  oled.print(buffer);
+    // Temperatura
+    snprintf(buffer, sizeof(buffer), "TEMP: %d C", lastTemperature);
+    oled.drawStr(0, 30, buffer);
 
-  // Invio al display
-  oled.display();
+    // Umidità
+    snprintf(buffer, sizeof(buffer), "HUM:  %d %%", lastHumidity);
+    oled.drawStr(0, 46, buffer);
+
+  } while (oled.nextPage());
 
 }
+
 
 
 void DisplayTimeDate()
@@ -217,18 +219,25 @@ void DisplayTimeDate()
   // this is for each change in parameters of DateTime
   DateTime now = RTC.now(); // (DateTime(year, month, day, hour, minutes, 0));
 
-  snprintf(buffer, sizeof(buffer), "%02d:%02d\n%02d/%02d/%04d",
-             now.hour(), now.minute(),
+  oled.firstPage();
+  do {
+    oled.setFont(u8g2_font_6x12_tf);
+
+    // Titolo
+    oled.drawStr(0, 12, "TIME AND DATE");
+
+    // Ora
+    snprintf(buffer, sizeof(buffer), "%02d:%02d", now.hour(), now.minute());
+    oled.setFont(u8g2_font_logisoso16_tr); // font più grande per l'orario
+    oled.drawStr(20, 36, buffer);
+
+    // Data
+    oled.setFont(u8g2_font_6x12_tf); // torna al font piccolo
+    snprintf(buffer, sizeof(buffer), "%02d/%02d/%04d",
              now.day(), now.month(), now.year());
+    oled.drawStr(20, 56, buffer);
 
-  oled.clearDisplay();
-  oled.setCursor(0, 0);
-  oled.print("  TIME AND DATE");
- 
-  oled.setCursor(20, 25);
-  oled.print(buffer);
-
-  oled.display();
+  } while (oled.nextPage());
 
 }
 
@@ -238,17 +247,17 @@ void DisplayAlarm() {
   // Leggi i valori correnti della sveglia (Alarm1)
   DateTime alarm1 = RTC.getAlarm1();
   
-  // Mostra su OLED
-  oled.clearDisplay();
-  oled.setCursor(0, 0);
-  oled.print("     ALARM");
-  
-  oled.setCursor(20, 25);
-  char buf[10] = {0};
-  snprintf(buf, sizeof(buf), "%02d:%02d", alarm1.hour(), alarm1.minute());
-  oled.print(buf);
-  
-  oled.display();
+  char buf[16];
+
+  oled.firstPage();
+  do {
+    oled.setFont(u8g2_font_6x12_tf);
+    oled.drawStr(0, 12, "ALARM");
+
+    snprintf(buf, sizeof(buf), "%02d:%02d", alarm1.hour(), alarm1.minute());
+    oled.drawStr(30, 40, buf);
+
+  } while (oled.nextPage());
 
 }
 
@@ -257,68 +266,72 @@ void DisplayAlarm() {
 void UpdateTimerDisplay(Timer &t) {
   DateTime now = RTC.now();
 
-  oled.clearDisplay();
-  oled.setCursor(0, 0);
-  oled.print("   TIMER");
+  char buf[16];
 
-  if (!t.running && !t.done) {
-    // nessun timer impostato
-    oled.setCursor(20, 25);
-    oled.print("No timer set");
-  } else {
-    TimeSpan remaining = t.endTime - now;
+  oled.firstPage();
+  do {
+    oled.setFont(u8g2_font_6x12_tf);
+    oled.drawStr(0, 12, "TIMER");
 
-    if (remaining.totalseconds() <= 0) {
-      t.running = false;
-      t.done = true;
-      tone(Buzzer_Pin, 1047); // beep
-      remaining = TimeSpan(0); // evita valori negativi
+    if (!t.running && !t.done) {
+      oled.drawStr(20, 40, "No timer set");
+    } else {
+      TimeSpan remaining = t.endTime - now;
+
+      if (remaining.totalseconds() <= 0) {
+        t.running = false;
+        t.done = true;
+        remaining = TimeSpan(0);
+      }
+
+      snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
+               remaining.hours(), remaining.minutes(), remaining.seconds());
+      oled.drawStr(20, 40, buf);
     }
+  } while (oled.nextPage());
 
-    char buf[9];
-    snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
-             remaining.hours(), remaining.minutes(), remaining.seconds());
-    oled.setCursor(20, 25);
-    oled.print(buf);
-  }
-
-  oled.display();
 }
 
 
 
 // ALL CHANGE FUNCTIONS
 void DisplayChange(const char* title, int* values, int numFields) {
+  char buf[32];
 
-  oled.clearDisplay();
-  oled.setCursor(0, 0);
-  oled.print(title);
+  oled.firstPage();
+  do {
+    oled.setFont(u8g2_font_6x12_tf);
 
-  oled.setCursor(10, 25);
+    // Titolo in alto
+    oled.drawStr(0, 12, title);
 
-  char buf[40];
-  buf[0] = '\0';  // azzera il buffer
+    // Riga principale per i valori
+    switch (numFields) {
+      case 2: // Es. Sveglia o Timer (HH:MM)
+        snprintf(buf, sizeof(buf), "%02d:%02d", values[0], values[1]);
+        oled.drawStr(25, 36, buf);
+        break;
 
-  // Aggiunge i campi in base a quanti ne servono
-  switch (numFields) {
-    case 2: // es. Sveglia, Timer
-      snprintf(buf, sizeof(buf), "%02d:%02d", values[0], values[1]);
-      break;
-    case 3: // es. Timer con secondi
-      snprintf(buf, sizeof(buf), "%02d:%02d:%02d", values[0], values[1], values[2]);
-      break;
-    case 5: // es. Ora e data completa
-      snprintf(buf, sizeof(buf), "%02d:%02d \n %02d/%02d/%04d",
-               values[0], values[1], values[2], values[3], values[4]);
-      break;
-    default:
-      snprintf(buf, sizeof(buf), "ERR");
-      break;
-  }
+      case 3: // Es. Timer con secondi (HH:MM:SS)
+        snprintf(buf, sizeof(buf), "%02d:%02d:%02d", values[0], values[1], values[2]);
+        oled.drawStr(20, 36, buf);
+        break;
 
-  oled.print(buf);
-  oled.display();
+      case 5: // Es. Data completa (HH:MM  GG/MM/AAAA)
+        snprintf(buf, sizeof(buf), "%02d:%02d", values[0], values[1]);
+        oled.drawStr(30, 30, buf);
+        snprintf(buf, sizeof(buf), "%02d/%02d/%04d", values[2], values[3], values[4]);
+        oled.drawStr(20, 48, buf);
+        break;
+
+      default:
+        oled.drawStr(10, 36, "Invalid format");
+        break;
+    }
+
+  } while (oled.nextPage());
 }
+
 
 
 void ChangeValue(int* values, int* minVals, int* maxVals, int numFields, const char* title) {
@@ -356,12 +369,16 @@ void ChangeValue(int* values, int* minVals, int* maxVals, int numFields, const c
     delay(150);
   }
 
-  // Piccola animazione di conferma
-  oled.clearDisplay();
-  oled.setCursor(10, 25);
-  oled.print("Saved!");
-  oled.display();
-  delay(500);
+  // Piccola animazione di conferma all’interno della funzione
+  for (int i = 0; i < 3; i++) {  // lampeggio “Saved!” 3 volte
+    oled.clearBuffer();
+    if (i % 2 == 0) {
+        oled.setFont(u8g2_font_ncenB08_tr);
+        oled.drawStr(20, 30, "Saved!");
+    }
+    oled.sendBuffer();
+    delay(250);
+}
 
 }
 
@@ -408,63 +425,70 @@ void ChangeTimer(Timer &t) {
   t.done = false;
 
   // feedback breve
-  oled.clearDisplay();
-  oled.setCursor(20, 25);
-  oled.print("TIMER STARTED");
-  oled.display();
+  oled.clearBuffer();             // Pulisce il buffer
+  oled.setFont(u8g2_font_ncenB08_tr); // Imposta un font leggibile
+  oled.drawStr(20, 30, "TIMER STARTED"); // Disegna la scritta al centro (approssimativo)
+  oled.sendBuffer();              // Aggiorna il display
   delay(500);
 }
 
 // --------
 // Functions for handling the alarms
+
 void PlayMelody(const int *melody, const int *durations, int length) {
+
   for (int i = 0; i < length; i++) {
     int noteDuration = 1000 / durations[i];
     tone(Buzzer_Pin, melody[i], noteDuration);
     delay(noteDuration * 1.3);
   }
   noTone(Buzzer_Pin);
+
 }
 
 
 void HandleWakeup() {
-  oled.clearDisplay();
-  oled.setCursor(10, 20);
-  oled.print("ALARM RINGING!");
-  oled.display();
+  // Mostra "ALARM RINGING!" sul display
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_ncenB08_tr); // Font leggibile
+  oled.drawStr(10, 30, "ALARM RINGING!");
+  oled.sendBuffer();
 
   // Esegui melodia sveglia finché non viene premuto il joystick
   while (!SW_Pin.debounce()) {
-    PlayMelody(alarm_melody, alarm_NoteDurations);
+    PlayMelody(alarm_melody, alarm_durations, sizeof(alarm_melody)/sizeof(alarm_melody[0]));
   }
 
   noTone(Buzzer_Pin);
   RTC.disableAlarm(1); // disattiva l’allarme fino a nuovo set
-  oled.clearDisplay();
-  oled.setCursor(10, 25);
-  oled.print("ALARM STOPPED");
-  oled.display();
+
+  // Mostra "ALARM STOPPED"
+  oled.clearBuffer();
+  oled.drawStr(10, 30, "ALARM STOPPED");
+  oled.sendBuffer();
   delay(1000);
 }
 
 
 void HandleTimerDone() {
-  oled.clearDisplay();
-  oled.setCursor(10, 20);
-  oled.print("TIMER DONE!");
-  oled.display();
+  // Mostra "TIMER DONE!" sul display
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_ncenB08_tr); // font leggibile
+  oled.drawStr(10, 30, "TIMER DONE!");
+  oled.sendBuffer();
 
-  // Melodia del timer finché non premi joystick
+  // Melodia del timer finché non premi il joystick
   while (!SW_Pin.debounce()) {
-    PlayMelody(timer_melody, timer_noteDurations);
+    PlayMelody(timer_melody, timer_durations, sizeof(timer_melody)/sizeof(timer_melody[0]));
   }
 
   noTone(Buzzer_Pin);
   RTC.disableAlarm(2); // disattiva il timer
-  oled.clearDisplay();
-  oled.setCursor(10, 25);
-  oled.print("TIMER STOPPED");
-  oled.display();
+
+  // Mostra "TIMER STOPPED"
+  oled.clearBuffer();
+  oled.drawStr(10, 30, "TIMER STOPPED");
+  oled.sendBuffer();
   delay(1000);
 }
 
@@ -484,12 +508,9 @@ void HandleAlarms() {
 }
 
 
-
 void loop()
 {
-
   HandleAlarms();
-  oled.clearDisplay();
 
   static menu STATE = Idle;
   // read coordinates to determine the state

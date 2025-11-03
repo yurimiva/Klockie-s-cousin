@@ -7,7 +7,7 @@ int alarm_melody[] = {
     NOTE_A4
   };
   
-int alarm_NoteDurations[] = {
+int alarm_durations[] = {
   8, 8, 4, 4,
   8, 8, 4, 4,
   8, 8, 4, 4,
@@ -15,10 +15,11 @@ int alarm_NoteDurations[] = {
 };
 
 int timer_melody[] = {
-  NOTE_C5, NOTE_E5, NOTE_G5, NOTE_C6
+  NOTE_E5, NOTE_G5, NOTE_A5, NOTE_G5, NOTE_E5
 };
-  
-int timer_NoteDurations[] = {
-  8, 8, 8, 4
+
+int timer_durations[] = {
+  8, 8, 4, 4, 2
 };
+
   
