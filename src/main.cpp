@@ -2,8 +2,8 @@
 #include <U8g2lib.h>
 #include <DHTStable.h>
 #include <RTClib.h>
+#include <OneButton.h>
 #include "pitches.h"
-#include "button.h"
 #include "melodies.h"
 
 // define the DHT
@@ -20,16 +20,21 @@ const int Joystick_Y = 15;
 // let's add an enum to mark things more easily
 enum Direction { UP, DOWN, LEFT, RIGHT, CENTER };
 
-// define the button
-Button SW_Pin; // switch pin
+#define BUTTON_PIN 3
+OneButton button(BUTTON_PIN, true, true); // pin, activeLow, pullup
+// variabile globale da usare solo quando suonano sveglia o timer
+volatile bool stopMelody = false;    // fermare la sveglia attiva
+volatile bool melodyPlaying = false; // segnala se una melodia suona o meno
+
+volatile bool buttonClicked = false;
+volatile bool longPressAction = false; // trigger per funzione extra
 
 // define an rtc object
 RTC_DS3231 RTC;
 
 // define the PIN connected to SQW
 const int SQW_INTERRUPT = 2;
-volatile bool alarm1Triggered = false;
-volatile bool alarm2Triggered = false;
+volatile bool rtcInterruptFlag = false;
 
 // define buzzer
 const int Buzzer_Pin = 8;
@@ -58,11 +63,28 @@ enum menu
 // ---
 
 // ISR function
-void onAlarm() {
-  alarm1Triggered = true;
-  alarm2Triggered = true;
+void onRTCInterrupt() {
+  rtcInterruptFlag = true;
 }
 
+// ---
+// Functions for the long and short press of the button
+void onButtonClick() {
+  // Se la sveglia o il timer stanno suonando → ferma solo la melodia
+  if (melodyPlaying) {
+    stopMelody = true;
+  } else {
+    // Altrimenti, è un click normale → usato dal menu
+    buttonClicked = true;
+  }
+}
+
+void onButtonLongPress() {
+  longPressAction = true; // funzione speciale, gestita nel loop
+}
+
+
+// setup
 void setup()
 {
   // Initialazing oled with U8g2
@@ -80,8 +102,8 @@ void setup()
   pinMode(Joystick_X, INPUT);
   pinMode(Joystick_Y, INPUT);
 
-  // define mode for button in mode INPUT_PULLUP
-  SW_Pin.begin(4);
+  button.attachClick(onButtonClick);           // click breve
+  button.attachLongPressStart(onButtonLongPress); // pressione lunga
 
   // buzzer
   pinMode(Buzzer_Pin, OUTPUT);
@@ -93,16 +115,14 @@ void setup()
   // setup for the SQW PIN
   // Making it so, that the alarm will trigger an interrupt
   pinMode(SQW_INTERRUPT, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(SQW_INTERRUPT), onAlarm, FALLING);
+  // stop oscillating signals at SQW Pin
+  // otherwise setAlarm will fail
+  RTC.writeSqwPinMode(DS3231_OFF);
 
-  // set alarm 1 flag to false (so alarm 1 didn't happen so far)
-  // if not done, this easily leads to problems, as the register isn't reset on reboot/recompile
   RTC.clearAlarm(1);
   RTC.clearAlarm(2);
 
-  // stop oscillating signals at SQW Pin
-  // otherwise setAlarm1 will fail
-  RTC.writeSqwPinMode(DS3231_OFF);
+  attachInterrupt(digitalPinToInterrupt(SQW_INTERRUPT), onRTCInterrupt, FALLING);
 
 }
 
@@ -211,8 +231,6 @@ void DisplayDHT()
 
 }
 
-
-
 void DisplayTimeDate()
 {
   char buffer[32] = {0}; // this buffer is used for copying a certain format and then actual printing
@@ -241,7 +259,6 @@ void DisplayTimeDate()
 
 }
 
-
 void DisplayAlarm() {
 
   // Leggi i valori correnti della sveglia (Alarm1)
@@ -260,7 +277,6 @@ void DisplayAlarm() {
   } while (oled.nextPage());
 
 }
-
 
 // Questa funzione va chiamata ogni ciclo del loop per aggiornare il display
 void UpdateTimerDisplay(Timer &t) {
@@ -291,7 +307,6 @@ void UpdateTimerDisplay(Timer &t) {
   } while (oled.nextPage());
 
 }
-
 
 
 // ALL CHANGE FUNCTIONS
@@ -332,8 +347,6 @@ void DisplayChange(const char* title, int* values, int numFields) {
   } while (oled.nextPage());
 }
 
-
-
 void ChangeValue(int* values, int* minVals, int* maxVals, int numFields, const char* title) {
 
   int index = 0;
@@ -364,24 +377,17 @@ void ChangeValue(int* values, int* minVals, int* maxVals, int numFields, const c
 
     if (index >= numFields) {
       done = true;
+      oled.clearBuffer();
+      oled.setFont(u8g2_font_ncenB08_tr);
+      oled.drawStr(20, 30, "Saved!");
+      oled.sendBuffer();
       break;
     }
+
     delay(150);
   }
 
-  // Piccola animazione di conferma all’interno della funzione
-  for (int i = 0; i < 3; i++) {  // lampeggio “Saved!” 3 volte
-    oled.clearBuffer();
-    if (i % 2 == 0) {
-        oled.setFont(u8g2_font_ncenB08_tr);
-        oled.drawStr(20, 30, "Saved!");
-    }
-    oled.sendBuffer();
-    delay(250);
 }
-
-}
-
 
 void ChangeTimeAndDate() {
 
@@ -394,7 +400,6 @@ void ChangeTimeAndDate() {
 
   RTC.adjust(DateTime(valori[4], valori[3], valori[2], valori[0], valori[1], 0));
 }
-
 
 void ChangeAlarm() {
 
@@ -409,7 +414,6 @@ void ChangeAlarm() {
   RTC.setAlarm1(DateTime(0, 0, 0, values[0], values[1], 0), DS3231_A1_Hour);
 
 }
-
 
 void ChangeTimer(Timer &t) {
   int values[2]  = {0, 0};
@@ -435,88 +439,71 @@ void ChangeTimer(Timer &t) {
 // --------
 // Functions for handling the alarms
 
-void PlayMelody(const int *melody, const int *durations, int length) {
+// Funzione per suonare melodia interrompibile dal bottone
+void PlayMelodyInterruptible(const int *melody, const int *durations, int length) {
+  melodyPlaying = true;
+  stopMelody = false;
 
-  for (int i = 0; i < length; i++) {
-    int noteDuration = 1000 / durations[i];
-    tone(Buzzer_Pin, melody[i], noteDuration);
-    delay(noteDuration * 1.3);
-  }
-  noTone(Buzzer_Pin);
-
-}
-
-
-void HandleWakeup() {
-  // Mostra "ALARM RINGING!" sul display
+  // Schermo vuoto mentre suona
   oled.clearBuffer();
-  oled.setFont(u8g2_font_ncenB08_tr); // Font leggibile
-  oled.drawStr(10, 30, "ALARM RINGING!");
   oled.sendBuffer();
 
-  // Esegui melodia sveglia finché non viene premuto il joystick
-  while (!SW_Pin.debounce()) {
-    PlayMelody(alarm_melody, alarm_durations, sizeof(alarm_melody)/sizeof(alarm_melody[0]));
-  }
+  while (!stopMelody) {
+    for (int i = 0; i < length && !stopMelody; i++) {
+      int noteDuration = 1000 / durations[i];
+      unsigned long start = millis();
 
-  noTone(Buzzer_Pin);
-  RTC.disableAlarm(1); // disattiva l’allarme fino a nuovo set
+      tone(Buzzer_Pin, melody[i]); // avvia la nota
 
-  // Mostra "ALARM STOPPED"
-  oled.clearBuffer();
-  oled.drawStr(10, 30, "ALARM STOPPED");
-  oled.sendBuffer();
-  delay(1000);
-}
+      while (millis() - start < noteDuration * 1.3) {
+        button.tick();
+        if (stopMelody) break;
+      }
 
-
-void HandleTimerDone() {
-  // Mostra "TIMER DONE!" sul display
-  oled.clearBuffer();
-  oled.setFont(u8g2_font_ncenB08_tr); // font leggibile
-  oled.drawStr(10, 30, "TIMER DONE!");
-  oled.sendBuffer();
-
-  // Melodia del timer finché non premi il joystick
-  while (!SW_Pin.debounce()) {
-    PlayMelody(timer_melody, timer_durations, sizeof(timer_melody)/sizeof(timer_melody[0]));
+      noTone(Buzzer_Pin);
+    }
   }
 
   noTone(Buzzer_Pin);
-  RTC.disableAlarm(2); // disattiva il timer
+  melodyPlaying = false;
+  stopMelody = false;
 
-  // Mostra "TIMER STOPPED"
   oled.clearBuffer();
-  oled.drawStr(10, 30, "TIMER STOPPED");
+  oled.setFont(u8g2_font_ncenB08_tr);
+  oled.drawStr(20, 30, "FIRING STOPPED");
   oled.sendBuffer();
-  delay(1000);
+  delay(800);
 }
 
 
+// Gestione allarmi/timer
 void HandleAlarms() {
-  if (alarm1Triggered) {
-    alarm1Triggered = false;
-    RTC.clearAlarm(1);
-    HandleWakeup();  // funzione separata per la sveglia
-  }
+  
+  if (rtcInterruptFlag) {
+    rtcInterruptFlag = false;
 
-  if (alarm2Triggered) {
-    alarm2Triggered = false;
-    RTC.clearAlarm(2);
-    HandleTimerDone();  // funzione separata per il timer
+    if (RTC.alarmFired(1)) {
+      RTC.clearAlarm(1);
+      PlayMelodyInterruptible(alarm_melody, alarm_durations, sizeof(alarm_melody)/sizeof(alarm_melody[0]));
+    }
+
+    if (RTC.alarmFired(2)) {
+      RTC.clearAlarm(2);
+      PlayMelodyInterruptible(timer_melody, timer_durations, sizeof(timer_melody)/sizeof(timer_melody[0]));
+    }
   }
 }
+
 
 
 void loop()
 {
+  button.tick(); 
   HandleAlarms();
 
   static menu STATE = Idle;
   // read coordinates to determine the state
-  int x = analogRead(Joystick_X) - 512; // Center around 0
-  int y = analogRead(Joystick_Y) - 512;
-  DetermineState(&STATE, x, y);
+  DetermineState(&STATE, analogRead(Joystick_X) - 512, analogRead(Joystick_Y) - 512);
 
   static Timer timer; // mantiene lo stato del timer tra i cicli
 
@@ -528,7 +515,10 @@ void loop()
 
   case ShowTimeAndDate:
     DisplayTimeDate();
-    if (SW_Pin.debounce()) STATE = ChangeTimeDate;
+    if (buttonClicked) {
+      STATE = ChangeTimeDate;
+      buttonClicked = false;
+    }
     break;
 
   case ShowTempAndHum:
@@ -537,12 +527,18 @@ void loop()
 
   case ShowAlarm:
     DisplayAlarm();
-    if (SW_Pin.debounce()) STATE = changeAlarm;
+    if (buttonClicked) {
+      STATE = changeAlarm;
+      buttonClicked = false;
+    }
     break;
 
   case ShowTimer:
     UpdateTimerDisplay(timer);
-    if (SW_Pin.debounce()) STATE = changeTimer;
+    if (buttonClicked) {
+      STATE = changeTimer;
+      buttonClicked = false;
+    }
     break;
 
   case ChangeTimeDate:
