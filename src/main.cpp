@@ -5,6 +5,9 @@
 #include <OneButton.h>
 #include "pitches.h"
 #include "melodies.h"
+#include <avr/sleep.h>
+#include <avr/power.h>
+
 
 // define the DHT
 #define DHTPIN 7 // pin connected to DHT11 sensor
@@ -132,13 +135,23 @@ void setup()
 
 
 // UTILITY FUNCTIONS
+void goIdle() {
+
+  set_sleep_mode(SLEEP_MODE_IDLE);
+  sleep_enable();
+  sleep_cpu();    // dorme finché arriva un interrupt
+  sleep_disable();
+}
+
 Direction readJoystick(int x, int y) {
 
   int deadzone = 100;
 
   // Deadzone check (joystick idle)
-  if (abs(x) < deadzone && abs(y) < deadzone)
+  if (abs(x) < deadzone && abs(y) < deadzone) {
+    goIdle();
     return CENTER;
+  }
 
   // Compare absolute values to determine dominant direction
   if (abs(x) > abs(y)) {
@@ -222,6 +235,16 @@ void DisplayDHT()
     unit = "F";
   }
 
+  // con questo pezzo evito di aggiornare ogni volta l'oled
+  // In questo modo ne riduco i consumi
+  static int lastShownTemp = -1000;
+  static int lastShownHum = -1;
+
+  if (abs(displayTemp - lastShownTemp) < 1 && lastHumidity == lastShownHum) return;
+
+  lastShownTemp = displayTemp;
+  lastShownHum = lastHumidity;
+
   char buffer[32];
   oled.firstPage();
   do {
@@ -238,10 +261,18 @@ void DisplayDHT()
 }
 
 void DisplayTimeDate() {
-  char buffer[32] = {0};
+
+  static int lastHour = -1;
+  static int lastMinute = -1;
+
   DateTime now = RTC.now();
 
-  int displayHour = now.hour();
+  if (now.hour() == lastHour && now.minute() == lastMinute) return;
+
+  lastHour = now.hour();
+  lastMinute = now.minute();
+
+  int displayHour = now.hour();  // variabile temporanea solo per la stampa
   const char* ampm = "";
 
   if (use12hFormat) {
@@ -258,6 +289,7 @@ void DisplayTimeDate() {
     }
   }
 
+  char buffer[32] = {0};
   oled.firstPage();
   do {
     oled.setFont(u8g2_font_6x12_tf);
@@ -266,9 +298,9 @@ void DisplayTimeDate() {
     // Ora
     oled.setFont(u8g2_font_logisoso16_tr);
     if (use12hFormat)
-      snprintf(buffer, sizeof(buffer), "%02d:%02d %s", displayHour, now.minute(), ampm);
+      snprintf(buffer, sizeof(buffer), "%02d:%02d %s", displayHour, lastMinute, ampm);
     else
-      snprintf(buffer, sizeof(buffer), "%02d:%02d", now.hour(), now.minute());
+      snprintf(buffer, sizeof(buffer), "%02d:%02d", lastHour, lastMinute);
     oled.drawStr(10, 36, buffer);
 
     // Data
@@ -276,9 +308,34 @@ void DisplayTimeDate() {
     snprintf(buffer, sizeof(buffer), "%02d/%02d/%04d", now.day(), now.month(), now.year());
     oled.drawStr(20, 56, buffer);
   } while (oled.nextPage());
+
 }
 
 void DisplayAlarm() {
+
+  static int lastHour = -1;
+  static int lastMinute = -1;
+  static bool lastEnabled = false;
+
+  if (!alarmEnabled && !lastEnabled) {
+    // Nessuna sveglia e già mostrato "NO ALARM SET" → non ridisegnare
+    return;
+  }
+
+  DateTime alarm1 = RTC.getAlarm1();
+
+  if (alarmEnabled &&
+      alarm1.hour() == lastHour &&
+      alarm1.minute() == lastMinute &&
+      lastEnabled == alarmEnabled) {
+    // Sveglia non cambiata → niente aggiornamento
+    return;
+  }
+
+  lastHour = alarm1.hour();
+  lastMinute = alarm1.minute();
+  lastEnabled = alarmEnabled;
+
   oled.firstPage();
   do {
     oled.setFont(u8g2_font_6x12_tf);
@@ -287,9 +344,29 @@ void DisplayAlarm() {
     if (!alarmEnabled) {
       oled.drawStr(20, 40, "NO ALARM SET");
     } else {
-      DateTime alarm1 = RTC.getAlarm1();
+      int displayHour = alarm1.hour();
+      const char* ampm = "";
+
+      if (use12hFormat) {
+        if (displayHour == 0) {
+          displayHour = 12;
+          ampm = "AM";
+        } else if (displayHour == 12) {
+          ampm = "PM";
+        } else if (displayHour > 12) {
+          displayHour -= 12;
+          ampm = "PM";
+        } else {
+          ampm = "AM";
+        }
+      }
+
       char buf[16];
-      snprintf(buf, sizeof(buf), "%02d:%02d", alarm1.hour(), alarm1.minute());
+      if (use12hFormat)
+        snprintf(buf, sizeof(buf), "%02d:%02d %s", displayHour, alarm1.minute(), ampm);
+      else
+        snprintf(buf, sizeof(buf), "%02d:%02d", alarm1.hour(), alarm1.minute());
+
       oled.drawStr(30, 40, buf);
     }
 
@@ -297,34 +374,44 @@ void DisplayAlarm() {
 }
 
 
-// Questa funzione va chiamata ogni ciclo del loop per aggiornare il display
 void UpdateTimerDisplay(Timer &t) {
+
+  static unsigned long lastDisplayUpdate = 0;
+  static int lastSeconds = -1;
+
+  unsigned long nowMillis = millis();
+  if (nowMillis - lastDisplayUpdate < 200) return; // controlla più spesso, ma aggiorna solo se serve
+  lastDisplayUpdate = nowMillis;
+
   DateTime now = RTC.now();
+  TimeSpan remaining = t.endTime - now;
 
+  // Gestione scadenza
+  if (remaining.totalseconds() <= 0 && t.running) {
+    t.running = false;
+    t.done = true;
+    remaining = TimeSpan(0);
+  }
+
+  // Evita refresh se i secondi non cambiano
+  if (remaining.seconds() == lastSeconds && t.running) return;
+  lastSeconds = remaining.seconds();
+
+  // --- DISPLAY ---
   char buf[16];
-
   oled.firstPage();
   do {
     oled.setFont(u8g2_font_6x12_tf);
     oled.drawStr(0, 12, "TIMER");
 
     if (!t.running && !t.done) {
-      oled.drawStr(20, 40, "No timer set");
+      oled.drawStr(20, 40, "NO TIMER SET");
     } else {
-      TimeSpan remaining = t.endTime - now;
-
-      if (remaining.totalseconds() <= 0) {
-        t.running = false;
-        t.done = true;
-        remaining = TimeSpan(0);
-      }
-
       snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
                remaining.hours(), remaining.minutes(), remaining.seconds());
       oled.drawStr(20, 40, buf);
     }
   } while (oled.nextPage());
-
 }
 
 
@@ -627,42 +714,21 @@ void loop()
         RTC.clearAlarm(1);
         RTC.disableAlarm(1);
         alarmEnabled = false;
-
-        oled.clearBuffer();
-        oled.setFont(u8g2_font_6x12_tf);
-        oled.drawStr(0, 30, "ALARM DISABLED");
-        oled.sendBuffer();
-        delay(800);
         break;
   
       case ShowTimer:
         if (timer.running) {
           timer.running = false;
           timer.done = false;
-          oled.clearBuffer();
-          oled.setFont(u8g2_font_6x12_tf);
-          oled.drawStr(0, 30, "TIMER CANCELLED");
-          oled.sendBuffer();
-          delay(800);
         }
         break;
   
       case ShowTimeAndDate:
         use12hFormat = !use12hFormat;
-        oled.clearBuffer();
-        oled.setFont(u8g2_font_6x12_tf);
-        oled.drawStr(0, 30, use12hFormat ? "12H MODE" : "24H MODE");
-        oled.sendBuffer();
-        delay(800);
         break;
   
       case ShowTempAndHum:
         useFahrenheit = !useFahrenheit;
-        oled.clearBuffer();
-        oled.setFont(u8g2_font_6x12_tf);
-        oled.drawStr(0, 30, useFahrenheit ? "FAHRENHEIT" : "CELSIUS");
-        oled.sendBuffer();
-        delay(800);
         break;
   
       default:
