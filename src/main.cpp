@@ -29,6 +29,11 @@ volatile bool melodyPlaying = false; // segnala se una melodia suona o meno
 volatile bool buttonClicked = false;
 volatile bool longPressAction = false; // trigger per funzione extra
 
+bool useFahrenheit = false;  // true → Fahrenheit
+bool use12hFormat = false;   // true → formato 12h (AM/PM)
+bool alarmEnabled = false;
+
+
 // define an rtc object
 RTC_DS3231 RTC;
 
@@ -47,7 +52,6 @@ struct Timer {
 };
 
 // need to set an enumerable that helps me with the display of the modes
-
 enum menu
 {
   Idle, // fatto
@@ -179,7 +183,7 @@ void DetermineState(menu *state, int Joystick_X, int Joystick_Y) {
     BeepOnce(&BEEPSTATE);
     *state = ShowTimer;
     break;
-  default:
+  case CENTER:
     BEEPSTATE = false;
     break;
   }
@@ -210,73 +214,88 @@ void DisplayDHT()
     lastReadTime = now;
   }
 
-  char buffer[32];
+  int displayTemp = lastTemperature;
+  const char* unit = "C";
 
+  if (useFahrenheit) {
+    displayTemp = (displayTemp * 1.8) + 32;
+    unit = "F";
+  }
+
+  char buffer[32];
   oled.firstPage();
   do {
-    oled.setFont(u8g2_font_6x12_tf); // font compatto e chiaro
-
-    // Titolo
+    oled.setFont(u8g2_font_6x12_tf);
     oled.drawStr(0, 12, "TEMP. & HUMIDITY");
 
-    // Temperatura
-    snprintf(buffer, sizeof(buffer), "TEMP: %d C", lastTemperature);
+    snprintf(buffer, sizeof(buffer), "TEMP: %d %s", displayTemp, unit);
     oled.drawStr(0, 30, buffer);
 
-    // Umidità
     snprintf(buffer, sizeof(buffer), "HUM:  %d %%", lastHumidity);
     oled.drawStr(0, 46, buffer);
-
   } while (oled.nextPage());
 
 }
 
-void DisplayTimeDate()
-{
-  char buffer[32] = {0}; // this buffer is used for copying a certain format and then actual printing
-  // this is for each change in parameters of DateTime
-  DateTime now = RTC.now(); // (DateTime(year, month, day, hour, minutes, 0));
+void DisplayTimeDate() {
+  char buffer[32] = {0};
+  DateTime now = RTC.now();
+
+  int displayHour = now.hour();
+  const char* ampm = "";
+
+  if (use12hFormat) {
+    if (displayHour == 0) {
+      displayHour = 12;
+      ampm = "AM";
+    } else if (displayHour == 12) {
+      ampm = "PM";
+    } else if (displayHour > 12) {
+      displayHour -= 12;
+      ampm = "PM";
+    } else {
+      ampm = "AM";
+    }
+  }
 
   oled.firstPage();
   do {
     oled.setFont(u8g2_font_6x12_tf);
-
-    // Titolo
     oled.drawStr(0, 12, "TIME AND DATE");
 
     // Ora
-    snprintf(buffer, sizeof(buffer), "%02d:%02d", now.hour(), now.minute());
-    oled.setFont(u8g2_font_logisoso16_tr); // font più grande per l'orario
-    oled.drawStr(20, 36, buffer);
+    oled.setFont(u8g2_font_logisoso16_tr);
+    if (use12hFormat)
+      snprintf(buffer, sizeof(buffer), "%02d:%02d %s", displayHour, now.minute(), ampm);
+    else
+      snprintf(buffer, sizeof(buffer), "%02d:%02d", now.hour(), now.minute());
+    oled.drawStr(10, 36, buffer);
 
     // Data
-    oled.setFont(u8g2_font_6x12_tf); // torna al font piccolo
-    snprintf(buffer, sizeof(buffer), "%02d/%02d/%04d",
-             now.day(), now.month(), now.year());
+    oled.setFont(u8g2_font_6x12_tf);
+    snprintf(buffer, sizeof(buffer), "%02d/%02d/%04d", now.day(), now.month(), now.year());
     oled.drawStr(20, 56, buffer);
-
   } while (oled.nextPage());
-
 }
 
 void DisplayAlarm() {
-
-  // Leggi i valori correnti della sveglia (Alarm1)
-  DateTime alarm1 = RTC.getAlarm1();
-  
-  char buf[16];
-
   oled.firstPage();
   do {
     oled.setFont(u8g2_font_6x12_tf);
     oled.drawStr(0, 12, "ALARM");
 
-    snprintf(buf, sizeof(buf), "%02d:%02d", alarm1.hour(), alarm1.minute());
-    oled.drawStr(30, 40, buf);
+    if (!alarmEnabled) {
+      oled.drawStr(20, 40, "NO ALARM SET");
+    } else {
+      DateTime alarm1 = RTC.getAlarm1();
+      char buf[16];
+      snprintf(buf, sizeof(buf), "%02d:%02d", alarm1.hour(), alarm1.minute());
+      oled.drawStr(30, 40, buf);
+    }
 
   } while (oled.nextPage());
-
 }
+
 
 // Questa funzione va chiamata ogni ciclo del loop per aggiornare il display
 void UpdateTimerDisplay(Timer &t) {
@@ -310,6 +329,12 @@ void UpdateTimerDisplay(Timer &t) {
 
 
 // ALL CHANGE FUNCTIONS
+/**
+ * @brief Display value editing interface on OLED.
+ * @param title The title shown at the top of the screen.
+ * @param values Array of integers (time/date values).
+ * @param numFields Number of editable fields.
+ */
 void DisplayChange(const char* title, int* values, int numFields) {
   char buf[32];
 
@@ -317,27 +342,23 @@ void DisplayChange(const char* title, int* values, int numFields) {
   do {
     oled.setFont(u8g2_font_6x12_tf);
 
-    // Titolo in alto
+    // Title
     oled.drawStr(0, 12, title);
 
-    // Riga principale per i valori
     switch (numFields) {
-      case 2: // Es. Sveglia o Timer (HH:MM)
+      case 2: // Example: Alarm or Timer (HH:MM)
         snprintf(buf, sizeof(buf), "%02d:%02d", values[0], values[1]);
         oled.drawStr(25, 36, buf);
         break;
 
-      case 3: // Es. Timer con secondi (HH:MM:SS)
+      case 3: // Example: Timer with seconds (HH:MM:SS)
         snprintf(buf, sizeof(buf), "%02d:%02d:%02d", values[0], values[1], values[2]);
         oled.drawStr(20, 36, buf);
         break;
 
-      case 5: // Es. Data completa (HH:MM  GG/MM/AAAA)
+      case 5: // Example: Full date/time (HH:MM  DD/MM/YYYY or MM/DD/YYYY)
         snprintf(buf, sizeof(buf), "%02d:%02d", values[0], values[1]);
         oled.drawStr(30, 30, buf);
-        snprintf(buf, sizeof(buf), "%02d/%02d/%04d", values[2], values[3], values[4]);
-        oled.drawStr(20, 48, buf);
-        break;
 
       default:
         oled.drawStr(10, 36, "Invalid format");
@@ -347,58 +368,94 @@ void DisplayChange(const char* title, int* values, int numFields) {
   } while (oled.nextPage());
 }
 
+/**
+ * @brief Handle value modification using joystick.
+ * @param values Pointer to array of editable values.
+ * @param minVals Minimum values for each field.
+ * @param maxVals Maximum values for each field.
+ * @param numFields Number of editable fields.
+ * @param title Title displayed during edit.
+ */
 void ChangeValue(int* values, int* minVals, int* maxVals, int numFields, const char* title) {
 
   int index = 0;
   bool done = false;
 
   while (!done) {
-
     Direction dir = readJoystick(analogRead(Joystick_X) - 512, analogRead(Joystick_Y) - 512);
 
-    switch (dir)
-    {
-    case UP:
-      values[index] = (values[index] >= maxVals[index]) ? minVals[index] : values[index] + 1;
-      break;
-    case DOWN:
-      values[index] = (values[index] <= minVals[index]) ? maxVals[index] : values[index] - 1;
-      break;
-
-    case RIGHT:
-      index++;
-      break;
-    case LEFT:
-      index--;
-      break;
+    switch (dir) {
+      case UP:
+        values[index] = (values[index] >= maxVals[index]) ? minVals[index] : values[index] + 1;
+        break;
+      case DOWN:
+        values[index] = (values[index] <= minVals[index]) ? maxVals[index] : values[index] - 1;
+        break;
+      case RIGHT:
+        index++;
+        break;
+      case LEFT:
+        index--;
+        break;
+      case CENTER:
+        break;
     }
 
-    DisplayChange(title, values, numFields); // funzione esterna che mostra il dato su OLED
+    DisplayChange(title, values, numFields);
 
     if (index >= numFields) {
       done = true;
       oled.clearBuffer();
-      oled.setFont(u8g2_font_ncenB08_tr);
-      oled.drawStr(20, 30, "Saved!");
+      oled.setFont(u8g2_font_6x12_tf);
+      oled.drawStr(25, 35, "Saved!");
       oled.sendBuffer();
       break;
     }
 
     delay(150);
   }
-
 }
 
+/**
+ * @brief Allow user to change system time and date.
+ * Applies user preferences for MDY/DMY and 12h/24h formats.
+ */
 void ChangeTimeAndDate() {
-
   DateTime now = RTC.now();
-  int valori[5] = { now.hour(), now.minute(), now.day(), now.month(), now.year() };
-  int minVal[5] = { 0, 0, 1, 1, 2000 };
-  int maxVal[5] = { 23, 59, 31, 12, 2099 };
 
-  ChangeValue(valori, minVal, maxVal, 5, "CHANGE TIME AND DATE");
+  // Extract current date/time
+  int hour = now.hour();
+  int minute = now.minute();
+  int day = now.day();
+  int month = now.month();
+  int year = now.year();
 
-  RTC.adjust(DateTime(valori[4], valori[3], valori[2], valori[0], valori[1], 0));
+  // Handle 12-hour format input
+  int isPM = 0;
+  if (use12hFormat) {
+    if (hour >= 12) {
+      hour = (hour > 12) ? hour - 12 : hour;
+      isPM = 1;
+    } else if (hour == 0) {
+      hour = 12;
+    }
+  }
+
+  int values[5] = {hour, minute, day, month, year};
+
+  // Value limits
+  int minVal[5] = { use12hFormat ? 1 : 0, 0, 1, 1, 2000 };
+  int maxVal[5] = { use12hFormat ? 12 : 23, 59, 31, 12, 2099 };
+
+  ChangeValue(values, minVal, maxVal, 5, "SET TIME AND DATE");
+
+  // Convert back to 24h before setting RTC
+  int adjHour = values[0];
+  if (use12hFormat) {
+    if (adjHour == 12) adjHour = 0;
+    if (isPM) adjHour += 12;
+  }
+
 }
 
 void ChangeAlarm() {
@@ -412,6 +469,7 @@ void ChangeAlarm() {
   ChangeValue(values, minVals, maxVals, 2, "SET ALARM");
 
   RTC.setAlarm1(DateTime(0, 0, 0, values[0], values[1], 0), DS3231_A1_Hour);
+  alarmEnabled = true;
 
 }
 
@@ -478,7 +536,7 @@ void PlayMelodyInterruptible(const int *melody, const int *durations, int length
 
 // Gestione allarmi/timer
 void HandleAlarms() {
-  
+
   if (rtcInterruptFlag) {
     rtcInterruptFlag = false;
 
@@ -508,52 +566,112 @@ void loop()
   static Timer timer; // mantiene lo stato del timer tra i cicli
 
 
+  // ===========================
+  // MAIN MENU STATE MACHINE
+  // ===========================
   switch (STATE)
   {
-  case Idle:
-    break;
+    case Idle:
+      break;
 
-  case ShowTimeAndDate:
-    DisplayTimeDate();
-    if (buttonClicked) {
-      STATE = ChangeTimeDate;
-      buttonClicked = false;
-    }
-    break;
+    case ShowTimeAndDate:
+      DisplayTimeDate();
+      if (buttonClicked) {
+        STATE = ChangeTimeDate;
+        buttonClicked = false;
+      }
+      break;
 
-  case ShowTempAndHum:
-    DisplayDHT();
-    break;
+    case ShowTempAndHum:
+      DisplayDHT();
+      break;
 
-  case ShowAlarm:
-    DisplayAlarm();
-    if (buttonClicked) {
-      STATE = changeAlarm;
-      buttonClicked = false;
-    }
-    break;
+    case ShowAlarm:
+      DisplayAlarm();
+      if (buttonClicked) {
+        STATE = changeAlarm;
+        buttonClicked = false;
+      }
+      break;
 
-  case ShowTimer:
-    UpdateTimerDisplay(timer);
-    if (buttonClicked) {
-      STATE = changeTimer;
-      buttonClicked = false;
-    }
-    break;
+    case ShowTimer:
+      UpdateTimerDisplay(timer);
+      if (buttonClicked) {
+        STATE = changeTimer;
+        buttonClicked = false;
+      }
+      break;
 
-  case ChangeTimeDate:
-    ChangeTimeAndDate();
-    STATE = ShowTimeAndDate;
-    break;
+    case ChangeTimeDate:
+      ChangeTimeAndDate();
+      STATE = ShowTimeAndDate;
+      break;
 
-  case changeAlarm:
-    ChangeAlarm();
-    STATE = ShowAlarm;
-    break;
+    case changeAlarm:
+      ChangeAlarm();
+      STATE = ShowAlarm;
+      break;
 
-  case changeTimer:
-    ChangeTimer(timer);
-    STATE = ShowTimer;
-    break;
+    case changeTimer:
+      ChangeTimer(timer);
+      STATE = ShowTimer;
+      break;
   }
+
+
+  if (longPressAction) {
+    switch (STATE) {
+  
+      case ShowAlarm:
+        // Disable alarm
+        RTC.clearAlarm(1);
+        RTC.disableAlarm(1);
+        alarmEnabled = false;
+
+        oled.clearBuffer();
+        oled.setFont(u8g2_font_6x12_tf);
+        oled.drawStr(0, 30, "ALARM DISABLED");
+        oled.sendBuffer();
+        delay(800);
+        break;
+  
+      case ShowTimer:
+        if (timer.running) {
+          timer.running = false;
+          timer.done = false;
+          oled.clearBuffer();
+          oled.setFont(u8g2_font_6x12_tf);
+          oled.drawStr(0, 30, "TIMER CANCELLED");
+          oled.sendBuffer();
+          delay(800);
+        }
+        break;
+  
+      case ShowTimeAndDate:
+        use12hFormat = !use12hFormat;
+        oled.clearBuffer();
+        oled.setFont(u8g2_font_6x12_tf);
+        oled.drawStr(0, 30, use12hFormat ? "12H MODE" : "24H MODE");
+        oled.sendBuffer();
+        delay(800);
+        break;
+  
+      case ShowTempAndHum:
+        useFahrenheit = !useFahrenheit;
+        oled.clearBuffer();
+        oled.setFont(u8g2_font_6x12_tf);
+        oled.drawStr(0, 30, useFahrenheit ? "FAHRENHEIT" : "CELSIUS");
+        oled.sendBuffer();
+        delay(800);
+        break;
+  
+      default:
+        break;
+    }
+  
+    longPressAction = false;
+  }
+  
+  
+
 }
